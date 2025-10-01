@@ -1,0 +1,29 @@
+# Build outputs and binaries
+*.o
+*.a
+*.exe
+gmon.out
+libklt.a
+
+# Generated feature result images (output from the algorithm)
+*.ppm
+features.ft
+features.txt
+profile.txt
+speed.txt
+*.png
+
+# IDE user-specific files (regenerated automatically)
+*.suo
+*.ncb
+*.user
+*.aps
+
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+
+# Temporary files
+*.tmp
+*.temp
