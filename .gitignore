@@ -11,7 +11,7 @@ features.ft
 features.txt
 profile.txt
 speed.txt
-*.png
+
 
 # IDE user-specific files (regenerated automatically)
 *.suo
