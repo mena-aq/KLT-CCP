@@ -7,25 +7,65 @@ saved to a text file; each feature list is also written to a PPM file.
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
+#include <dirent.h>
 #include "pnmio.h"
 #include "klt.h"
 
 /* #define REPLACE */
 
+// Function to count image files in dataset folder
+int count_image_files(const char* folder_path) {
+  DIR *dir;
+  struct dirent *entry;
+  int count = 0;
+  
+  dir = opendir(folder_path);
+  if (dir == NULL) {
+    printf("Error: Cannot open directory %s\n", folder_path);
+    return -1;
+  }
+  
+  while ((entry = readdir(dir)) != NULL) {
+    // Check if filename matches pattern img*.pgm
+    if (strncmp(entry->d_name, "img", 3) == 0 && 
+        strstr(entry->d_name, ".pgm") != NULL) {
+      count++;
+    }
+  }
+  
+  closedir(dir);
+  return count;
+}
+
 #ifdef WIN32
 int RunExample3()
 #else
-int main()
+int main(int argc, char *argv[])
 #endif
 {
   unsigned char *img1, *img2;
   char fnamein[100], fnameout[100];
+  char dataset_folder[200] = "dataset1"; // default folder
   KLT_TrackingContext tc;
   KLT_FeatureList fl;
   KLT_FeatureTable ft;
-  int nFeatures = 150, nFrames = 10;
+  int nFeatures = 550, nFrames;
   int ncols, nrows;
   int i;
+
+  // Check if dataset folder is provided as command-line argument
+  if (argc > 1) {
+    strcpy(dataset_folder, argv[1]);
+  }
+
+  // Count the number of image files in the dataset folder
+  nFrames = count_image_files(dataset_folder);
+  if (nFrames <= 0) {
+    printf("Error: No image files found in %s or cannot access folder\n", dataset_folder);
+    return -1;
+  }
+  printf("Found %d image files in %s\n", nFrames, dataset_folder);
 
   tc = KLTCreateTrackingContext();
   fl = KLTCreateFeatureList(nFeatures);
@@ -34,7 +74,8 @@ int main()
   tc->writeInternalImages = FALSE;
   tc->affineConsistencyCheck = -1;  /* set this to 2 to turn on affine consistency check */
  
-  img1 = pgmReadFile("img0.pgm", NULL, &ncols, &nrows);
+  sprintf(fnamein, "%s/img0.pgm", dataset_folder);
+  img1 = pgmReadFile(fnamein, NULL, &ncols, &nrows);
   img2 = (unsigned char *) malloc(ncols*nrows*sizeof(unsigned char));
 
   KLTSelectGoodFeatures(tc, img1, ncols, nrows, fl);
@@ -42,7 +83,7 @@ int main()
   KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, "feat0.ppm");
 
   for (i = 1 ; i < nFrames ; i++)  {
-    sprintf(fnamein, "img%d.pgm", i);
+    sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
     pgmReadFile(fnamein, img2, &ncols, &nrows);
     KLTTrackFeatures(tc, img1, img2, ncols, nrows, fl);
 #ifdef REPLACE
