@@ -1,3 +1,25 @@
+## Running Instructions
+
+### Make libraries:
+```
+make lib
+```
+### Make example3:
+```
+make example3
+```
+
+### Run example and generate profile (uses dataset3 if not specified):
+```
+make run DATASET=dataset1|dataset2|dataset3 
+```
+
+### Clean:
+```
+make clean
+```
+	
+	
 **********************************************************************
 NOTICE:
 
@@ -35,9 +57,3 @@ manuals have been placed in the current subdirectory 'doc'.
 
 ***********************************************************************
 
-Running Instructions:
-Enter these commands in the terminal:
-	- make lib
-	- make example3
-	- make run DATASET=dataset1|dataset2|dataset3 (if not specified, dataset defaults to dataset 3)
-	- make clean
