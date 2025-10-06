@@ -33,3 +33,11 @@ The code can be obtained from http://www.ces.clemson.edu/~stb/klt
 where the official manuals reside.  For your convenience, unofficial 
 manuals have been placed in the current subdirectory 'doc'.
 
+***********************************************************************
+
+Running Instructions:
+Enter these commands in the terminal:
+	- make lib
+	- make example3
+	- make run DATASET=dataset1|dataset2|dataset3 (if not specified, dataset defaults to dataset 3)
+	- make clean
