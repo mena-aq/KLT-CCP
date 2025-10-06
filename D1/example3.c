@@ -9,12 +9,12 @@ saved to a text file; each feature list is also written to a PPM file.
 #include <stdio.h>
 #include <string.h>
 #include <dirent.h>
+#include <sys/stat.h>
 #include "pnmio.h"
 #include "klt.h"
 
-/* #define REPLACE */
 
-// Function to count image files in dataset folder
+// Function to count image files in dataset folder 
 int count_image_files(const char* folder_path) {
   DIR *dir;
   struct dirent *entry;
@@ -47,6 +47,8 @@ int main(int argc, char *argv[])
   unsigned char *img1, *img2;
   char fnamein[100], fnameout[100];
   char dataset_folder[200] = "dataset3"; // default folder
+  char output_folder[200] = "output";
+
   KLT_TrackingContext tc;
   KLT_FeatureList fl;
   KLT_FeatureTable ft;
@@ -54,12 +56,15 @@ int main(int argc, char *argv[])
   int ncols, nrows;
   int i;
 
-  // Check if dataset folder is provided as command-line argument
+  // create output directory if it doesn't exist
+  mkdir(output_folder, 0755);
+
+  // check if dataset folder is provided as command-line argument
   if (argc > 1) {
     strcpy(dataset_folder, argv[1]);
   }
 
-  // Count the number of image files in the dataset folder
+  // count the number of image files in the dataset folder
   nFrames = count_image_files(dataset_folder);
   if (nFrames <= 0) {
     printf("Error: No image files found in %s or cannot access folder\n", dataset_folder);
@@ -80,7 +85,8 @@ int main(int argc, char *argv[])
 
   KLTSelectGoodFeatures(tc, img1, ncols, nrows, fl);
   KLTStoreFeatureList(fl, ft, 0);
-  KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, "feat0.ppm");
+  sprintf(fnameout, "%s/feat0.ppm", output_folder);
+  KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, fnameout);
 
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
@@ -90,7 +96,7 @@ int main(int argc, char *argv[])
     KLTReplaceLostFeatures(tc, img2, ncols, nrows, fl);
 #endif
     KLTStoreFeatureList(fl, ft, i);
-    sprintf(fnameout, "feat%d.ppm", i);
+    sprintf(fnameout, "%s/feat%d.ppm", output_folder, i);
     KLTWriteFeatureListToPPM(fl, img2, ncols, nrows, fnameout);
   }
   KLTWriteFeatureTable(ft, "features.txt", "%5.1f");
