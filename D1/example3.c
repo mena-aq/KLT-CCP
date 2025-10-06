@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
 {
   unsigned char *img1, *img2;
   char fnamein[100], fnameout[100];
-  char dataset_folder[200] = "dataset1"; // default folder
+  char dataset_folder[200] = "dataset3"; // default folder
   KLT_TrackingContext tc;
   KLT_FeatureList fl;
   KLT_FeatureTable ft;

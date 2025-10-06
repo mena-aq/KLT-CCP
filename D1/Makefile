@@ -44,13 +44,19 @@ lib: $(ARCH:.c=.o)
 
 example3: libklt.a
 	$(CC) -O3 $(CFLAGS) -o $@ $@.c -L. -lklt $(LIB) -lm
+	
+run: example3
+	./example3 $(DATASET)
+	gprof ./example3 > profile.txt
+	gprof ./example3 | python3 gprof2dot.py | dot -Tpng -o callgraph.png
+	@echo "Profiling complete: profile.txt and callgraph.png generated"
 
 depend:
 	makedepend $(ARCH) $(EXAMPLES)
 
 clean:
 	rm -f *.o *.a $(EXAMPLES:.c=) *.tar *.tar.gz libklt.a \
-	      feat*.ppm features.ft features.txt
+	      feat*.ppm features.ft features.txt gmon.out profile.txt callgraph.png
 
 
 
