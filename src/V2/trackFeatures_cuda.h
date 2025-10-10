@@ -19,6 +19,12 @@ __global__ void convolveImageHorizontalKernel();
 __global__ void convolveImageVerticalKernel();
 
 
+__device__ float interpolate(
+	float x,
+	float y,
+	_KLT_FloatImage img
+);
+
 __global__ void trackFeaturesKernel(
 	KLT_TrackingContext *d_tc,
 	_KLT_Pyramid d_pyramid1,

@@ -10,7 +10,7 @@
 
 #include "trackFeatures_cuda.h"
 
-__host__ KLTAllocateFeatureList(KLT_FeatureList** d_fl, int nFeatures){
+void KLTAllocateFeatureList(KLT_FeatureList** d_fl, int nFeatures){
   int nbytes = sizeof(KLT_FeatureListRec) +
     nFeatures * sizeof(KLT_Feature) +
     nFeatures * sizeof(KLT_FeatureRec);
@@ -18,7 +18,7 @@ __host__ KLTAllocateFeatureList(KLT_FeatureList** d_fl, int nFeatures){
 }
 
 // Function to count image files in dataset folder 
-__host__ int count_image_files(const char* folder_path) {
+int count_image_files(const char* folder_path) {
   DIR *dir;
   struct dirent *entry;
   int count = 0;
