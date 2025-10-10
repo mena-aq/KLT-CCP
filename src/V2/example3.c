@@ -75,7 +75,7 @@ int main(int argc, char *argv[])
   tc = KLTCreateTrackingContext();
   fl = KLTCreateFeatureList(nFeatures);
   ft = KLTCreateFeatureTable(nFrames, nFeatures);
-  tc->sequentialMode = TRUE;
+  tc->sequentialMode = TRUE; // USES SEQUENTIAL MODE
   tc->writeInternalImages = FALSE;
   tc->affineConsistencyCheck = -1;  /* set this to 2 to turn on affine consistency check */
  
@@ -88,6 +88,7 @@ int main(int argc, char *argv[])
   sprintf(fnameout, "%s/feat0.ppm", output_folder);
   KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, fnameout);
 
+  // ----- KLTTrackFeatures is called nFrames-1 times in a loop -----
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
     pgmReadFile(fnamein, img2, &ncols, &nrows);

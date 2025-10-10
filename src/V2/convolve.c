@@ -270,6 +270,7 @@ static void _convolveSeparate(
  * _KLTComputeGradients
  */
 
+ // An image gradient is the pixel-wise rate of change of intensity in the x or y direction
 void _KLTComputeGradients(
   _KLT_FloatImage img,
   float sigma,

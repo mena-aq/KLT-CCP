@@ -90,9 +90,9 @@ typedef struct  {
 
 
 typedef struct  {
-  KLT_locType x;
+  KLT_locType x; // subpixel(float) location
   KLT_locType y;
-  int val;	
+  int val;	 //status: tracked, lost, etc.
   /* for affine mapping */
   _KLT_FloatImage aff_img; 
   _KLT_FloatImage aff_img_gradx;
