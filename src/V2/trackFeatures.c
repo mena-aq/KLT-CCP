@@ -28,6 +28,10 @@ typedef float *_FloatWindow;
  * gray-level value of the point in the image.  
  */
 
+ // basically each int pixel has a intensity/gradient
+ // but feature window pixels are float (subpixel accuracy)
+ // so we need to interpolate the intensity/gradient value at that subpixel location
+ // using weighted average of the 4 nearest int pixel values
 static float _interpolate(
   float x, 
   float y, 
@@ -50,10 +54,10 @@ static float _interpolate(
 
   assert (xt >= 0 && yt >= 0 && xt <= img->ncols - 2 && yt <= img->nrows - 2);
 
-  return ( (1-ax) * (1-ay) * *ptr +
-           ax   * (1-ay) * *(ptr+1) +
-           (1-ax) *   ay   * *(ptr+(img->ncols)) +
-           ax   *   ay   * *(ptr+(img->ncols)+1) );
+  return ( (1-ax) * (1-ay) * *ptr + //top-left
+           ax   * (1-ay) * *(ptr+1) + //top-right
+           (1-ax) *   ay   * *(ptr+(img->ncols)) + //bottom-left
+           ax   *   ay   * *(ptr+(img->ncols)+1) ); //bottom-right
 }
 
 
@@ -112,14 +116,15 @@ static void _computeGradientSum(
   register int i, j;
 
   /* Compute values */
+  // for each pixel in the window
   for (j = -hh ; j <= hh ; j++)
     for (i = -hw ; i <= hw ; i++)  {
-      g1 = _interpolate(x1+i, y1+j, gradx1);
-      g2 = _interpolate(x2+i, y2+j, gradx2);
-      *gradx++ = g1 + g2;
-      g1 = _interpolate(x1+i, y1+j, grady1);
-      g2 = _interpolate(x2+i, y2+j, grady2);
-      *grady++ = g1 + g2;
+      g1 = _interpolate(x1+i, y1+j, gradx1); //get bilinear interpolated value in gradx1
+      g2 = _interpolate(x2+i, y2+j, gradx2); //get bilinear interpolated value in gradx2
+      *gradx++ = g1 + g2; //store the sum in gradx window
+      g1 = _interpolate(x1+i, y1+j, grady1); //get bilinear interpolated value in grady1
+      g2 = _interpolate(x2+i, y2+j, grady2);  //get bilinear interpolated value in grady2
+      *grady++ = g1 + g2;   //store the sum in grady window
     }
 }
 
@@ -399,7 +404,7 @@ static int _trackFeature(
   float max_residue,   /* residue threshold for declaring KLT_LARGE_RESIDUE */
   int lighting_insensitive)  /* whether to normalize for gain and bias */ // in example3 this is 0 (FALSE)
 {
-  _FloatWindow imgdiff, gradx, grady;
+  _FloatWindow imgdiff, gradx, grady; // windows for intensity difference and gradients
   float gxx, gxy, gyy, ex, ey, dx, dy; // 2x2 gradient matrix and 2x1 error vector and displacement
   int iteration = 0;
   int status;

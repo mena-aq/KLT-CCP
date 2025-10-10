@@ -113,11 +113,12 @@ void _KLTComputePyramid(
   for (i = 1 ; i < pyramid->nLevels ; i++)  {
     tmpimg = _KLTCreateFloatImage(ncols, nrows);
 
-    // --------- calls convolve_seperate with Gaussian kernel (blur) ---------------
+    // --------- calls convolve_seperate  ---------------
     _KLTComputeSmoothedImage(currimg, sigma, tmpimg);
 
 
     /* Subsample */
+    // downsample with the smoothed img
     oldncols = ncols;
     ncols /= subsampling;  nrows /= subsampling;
     for (y = 0 ; y < nrows ; y++)
