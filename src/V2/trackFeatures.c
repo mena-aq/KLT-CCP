@@ -28,6 +28,10 @@ typedef float *_FloatWindow;
  * gray-level value of the point in the image.  
  */
 
+ // basically each int pixel has a intensity/gradient
+ // but feature window pixels are float (subpixel accuracy)
+ // so we need to interpolate the intensity/gradient value at that subpixel location
+ // using weighted average of the 4 nearest int pixel values
 static float _interpolate(
   float x, 
   float y, 
@@ -50,10 +54,10 @@ static float _interpolate(
 
   assert (xt >= 0 && yt >= 0 && xt <= img->ncols - 2 && yt <= img->nrows - 2);
 
-  return ( (1-ax) * (1-ay) * *ptr +
-           ax   * (1-ay) * *(ptr+1) +
-           (1-ax) *   ay   * *(ptr+(img->ncols)) +
-           ax   *   ay   * *(ptr+(img->ncols)+1) );
+  return ( (1-ax) * (1-ay) * *ptr + //top-left
+           ax   * (1-ay) * *(ptr+1) + //top-right
+           (1-ax) *   ay   * *(ptr+(img->ncols)) + //bottom-left
+           ax   *   ay   * *(ptr+(img->ncols)+1) ); //bottom-right
 }
 
 
@@ -78,11 +82,12 @@ static void _computeIntensityDifference(
   register int i, j;
 
   /* Compute values */
+  // at each pixel in the window
   for (j = -hh ; j <= hh ; j++)
     for (i = -hw ; i <= hw ; i++)  {
-      g1 = _interpolate(x1+i, y1+j, img1);
-      g2 = _interpolate(x2+i, y2+j, img2);
-      *imgdiff++ = g1 - g2;
+      g1 = _interpolate(x1+i, y1+j, img1); //get bilinear interpolated value in img1
+      g2 = _interpolate(x2+i, y2+j, img2); //get bilinear interpolated value in img2
+      *imgdiff++ = g1 - g2; //store the difference in imgdiff window
     }
 }
 
@@ -111,14 +116,15 @@ static void _computeGradientSum(
   register int i, j;
 
   /* Compute values */
+  // for each pixel in the window
   for (j = -hh ; j <= hh ; j++)
     for (i = -hw ; i <= hw ; i++)  {
-      g1 = _interpolate(x1+i, y1+j, gradx1);
-      g2 = _interpolate(x2+i, y2+j, gradx2);
-      *gradx++ = g1 + g2;
-      g1 = _interpolate(x1+i, y1+j, grady1);
-      g2 = _interpolate(x2+i, y2+j, grady2);
-      *grady++ = g1 + g2;
+      g1 = _interpolate(x1+i, y1+j, gradx1); //get bilinear interpolated value in gradx1
+      g2 = _interpolate(x2+i, y2+j, gradx2); //get bilinear interpolated value in gradx2
+      *gradx++ = g1 + g2; //store the sum in gradx window
+      g1 = _interpolate(x1+i, y1+j, grady1); //get bilinear interpolated value in grady1
+      g2 = _interpolate(x2+i, y2+j, grady2);  //get bilinear interpolated value in grady2
+      *grady++ = g1 + g2;   //store the sum in grady window
     }
 }
 
@@ -379,7 +385,7 @@ static float _sumAbsFloatWindow(
  */
 
 static int _trackFeature(
-  float x1,  /* location of window in first image */
+  float x1,  /* location of window in first image */    // center coordinates
   float y1,
   float *x2, /* starting location of search in second image */
   float *y2,
@@ -396,10 +402,10 @@ static int _trackFeature(
   float small,         /* determinant threshold for declaring KLT_SMALL_DET */
   float th,            /* displacement threshold for stopping               */
   float max_residue,   /* residue threshold for declaring KLT_LARGE_RESIDUE */
-  int lighting_insensitive)  /* whether to normalize for gain and bias */
+  int lighting_insensitive)  /* whether to normalize for gain and bias */ // in example3 this is 0 (FALSE)
 {
-  _FloatWindow imgdiff, gradx, grady;
-  float gxx, gxy, gyy, ex, ey, dx, dy;
+  _FloatWindow imgdiff, gradx, grady; // windows for intensity difference and gradients
+  float gxx, gxy, gyy, ex, ey, dx, dy; // 2x2 gradient matrix and 2x1 error vector and displacement
   int iteration = 0;
   int status;
   int hw = width/2;
@@ -410,9 +416,9 @@ static int _trackFeature(
 
 	
   /* Allocate memory for windows */
-  imgdiff = _allocateFloatWindow(width, height);
-  gradx   = _allocateFloatWindow(width, height);
-  grady   = _allocateFloatWindow(width, height);
+  imgdiff = _allocateFloatWindow(width, height); //intensity difference window
+  gradx   = _allocateFloatWindow(width, height); //sum of x gradients window
+  grady   = _allocateFloatWindow(width, height); //sum of y gradients window
 
   /* Iteratively update the window position */
   do  {
@@ -432,22 +438,32 @@ static int _trackFeature(
                                   width, height, imgdiff);
       _computeGradientSumLightingInsensitive(gradx1, grady1, gradx2, grady2, 
 			  img1, img2, x1, y1, *x2, *y2, width, height, gradx, grady);
+
     } else {
+      // ---------- example3 uses this block ------------
+      // -------------- calls interpolate for each pixel in window 2 times ----------------
       _computeIntensityDifference(img1, img2, x1, y1, *x2, *y2, 
                                   width, height, imgdiff);
+      // --------------------------------------------------
+
+      // ----calls interpolate for each pixel in gradient window 2 times in x and y so 4 times ----
       _computeGradientSum(gradx1, grady1, gradx2, grady2, 
 			  x1, y1, *x2, *y2, width, height, gradx, grady);
+      // ------------------------------------
+
     }
 		
 
     /* Use these windows to construct matrices */
+    // find gxx, gxy, gyy
     _compute2by2GradientMatrix(gradx, grady, width, height, 
                                &gxx, &gxy, &gyy);
+    // find ex, ey , how much to move in x and y direction
     _compute2by1ErrorVector(imgdiff, gradx, grady, width, height, step_factor,
                             &ex, &ey);
 				
     /* Using matrices, solve equation for new displacement */
-    status = _solveEquation(gxx, gxy, gyy, ex, ey, small, &dx, &dy);
+    status = _solveEquation(gxx, gxy, gyy, ex, ey, small, &dx, &dy); //find dx and dy
     if (status == KLT_SMALL_DET)  break;
 
     *x2 += dx;
@@ -455,6 +471,10 @@ static int _trackFeature(
     iteration++;
 
   }  while ((fabs(dx)>=th || fabs(dy)>=th) && iteration < max_iterations);
+  // When both dx and dy are smaller than th, the algorithm considers the feature position to have converged and stops iterating.
+  // At first: dx and dy may be large (big correction needed).
+  // As you iterate: dx and dy shrink as the solution converges
+
 
   /* Check whether window is out of bounds */
   if (*x2-hw < 0.0f || nc-(*x2+hw) < one_plus_eps || 
@@ -462,6 +482,7 @@ static int _trackFeature(
     status = KLT_OOB;
 
   /* Check whether residue is too large */
+  // Residue is the average absolute intensity difference between the tracked windows.
   if (status == KLT_TRACKED)  {
     if (lighting_insensitive)
       _computeIntensityDifferenceLightingInsensitive(img1, img2, x1, y1, *x2, *y2, 
@@ -1282,6 +1303,9 @@ void KLTTrackFeatures(
 
 	/* Process first image by converting to float, smoothing, computing */
 	/* pyramid, and computing gradient pyramids */
+
+  // if sequential mode and previous pyramid exists, reuse it
+  // example3 uses sequential mode which means the first if block is executed for all frames except the first one
 	if (tc->sequentialMode && tc->pyramid_last != NULL)  {
 		pyramid1 = (_KLT_Pyramid) tc->pyramid_last;
 		pyramid1_gradx = (_KLT_Pyramid) tc->pyramid_last_gradx;
@@ -1292,33 +1316,59 @@ void KLTTrackFeatures(
 			ncols, nrows, pyramid1->ncols[0], pyramid1->nrows[0]);
 		assert(pyramid1_gradx != NULL);
 		assert(pyramid1_grady != NULL);
+
 	} else  {
+
+    // ------ this block is only executed ONCE in example3 for the first frame ------
 		floatimg1_created = TRUE;
 		floatimg1 = _KLTCreateFloatImage(ncols, nrows);
 		_KLTToFloatImage(img1, ncols, nrows, tmpimg);
+
+    // ------------- convolve_seperate with Gaussian kernel (blur) ---------------
 		_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg1);
+    //---------------------------------------------------------------------------
+
 		pyramid1 = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
-		_KLTComputePyramid(floatimg1, pyramid1, tc->pyramid_sigma_fact);
+
+		// ------------- calls ComputeSmoothedImage at each level which calls convolve_seperate ---------------
+    _KLTComputePyramid(floatimg1, pyramid1, tc->pyramid_sigma_fact);
+    // --------------------------------------------------------------------------
+
 		pyramid1_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
 		pyramid1_grady = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
+
+    // ------ calls convolve_seperate for both gradx and grady for each level ---------
 		for (i = 0 ; i < tc->nPyramidLevels ; i++)
 			_KLTComputeGradients(pyramid1->img[i], tc->grad_sigma, 
 			pyramid1_gradx->img[i],
 			pyramid1_grady->img[i]);
+    // --------------------------------------------------------------------------
+    
 	}
 
 	/* Do the same thing with second image */
 	floatimg2 = _KLTCreateFloatImage(ncols, nrows);
 	_KLTToFloatImage(img2, ncols, nrows, tmpimg);
+
+  // ------------- convolve_seperate with Gaussian kernel (blur) ---------------
 	_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg2);
-	pyramid2 = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
-	_KLTComputePyramid(floatimg2, pyramid2, tc->pyramid_sigma_fact);
-	pyramid2_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
+	// --------------------------------------------------------------------------
+
+  pyramid2 = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
+	
+  // ------------- calls ComputeSmoothedImage at each level which calls convolve_seperate ---------------
+  _KLTComputePyramid(floatimg2, pyramid2, tc->pyramid_sigma_fact);
+	// --------------------------------------------------------------------------
+
+  pyramid2_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
 	pyramid2_grady = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
-	for (i = 0 ; i < tc->nPyramidLevels ; i++)
+	
+  // ------ calls convolve_seperate for both gradx and grady for each level ---------
+  for (i = 0 ; i < tc->nPyramidLevels ; i++)
 		_KLTComputeGradients(pyramid2->img[i], tc->grad_sigma, 
 		pyramid2_gradx->img[i],
 		pyramid2_grady->img[i]);
+  // --------------------------------------------------------------------------
 
 	/* Write internal images */
 	if (tc->writeInternalImages)  {
@@ -1339,6 +1389,8 @@ void KLTTrackFeatures(
 		}
 	}
 
+
+  // ----- for understanding Feature struct go to klt.h ----------------
 	/* For each feature, do ... */
 	for (indx = 0 ; indx < featurelist->nFeatures ; indx++)  {
 
@@ -1361,8 +1413,10 @@ void KLTTrackFeatures(
 				xloc *= subsampling;  yloc *= subsampling;
 				xlocout *= subsampling;  ylocout *= subsampling;
 
+        /// ------------ calls interpolate ---------------
+        // --- called nLevels times for each feature ----
 				val = _trackFeature(xloc, yloc, 
-					&xlocout, &ylocout,
+					&xlocout, &ylocout, // position in second image
 					pyramid1->img[r], 
 					pyramid1_gradx->img[r], pyramid1_grady->img[r], 
 					pyramid2->img[r], 
@@ -1500,6 +1554,7 @@ void KLTTrackFeatures(
 		}
 	}
 
+  // to reuse pyramid of current image as previous image in next call
 	if (tc->sequentialMode)  {
 		tc->pyramid_last = pyramid2;
 		tc->pyramid_last_gradx = pyramid2_gradx;

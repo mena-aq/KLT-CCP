@@ -20,6 +20,7 @@
  *
  */
 
+ // ---------- look at definition of _KLT_PyramidRec in pyramid.h -----------
 _KLT_Pyramid _KLTCreatePyramid(
   int ncols,
   int nrows,
@@ -111,10 +112,13 @@ void _KLTComputePyramid(
   currimg = img;
   for (i = 1 ; i < pyramid->nLevels ; i++)  {
     tmpimg = _KLTCreateFloatImage(ncols, nrows);
+
+    // --------- calls convolve_seperate  ---------------
     _KLTComputeSmoothedImage(currimg, sigma, tmpimg);
 
 
     /* Subsample */
+    // downsample with the smoothed img
     oldncols = ncols;
     ncols /= subsampling;  nrows /= subsampling;
     for (y = 0 ; y < nrows ; y++)
@@ -124,7 +128,7 @@ void _KLTComputePyramid(
                       (subsampling*x+subhalf)];
 
     /* Reassign current image */
-    currimg = pyramid->img[i];
+    currimg = pyramid->img[i]; //curr image for next level is the current level img
 				
     _KLTFreeFloatImage(tmpimg);
   }

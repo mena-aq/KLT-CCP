@@ -7,6 +7,10 @@
 
 #include "klt_util.h"
 
+// pyramid basically contains multiple images at different scales
+// each level is a downsampled version of the previous level
+// subsampling is the factor by which the image is downsampled at each level
+// ncols and nrows are arrays containing the dimensions of each level
 typedef struct  {
   int subsampling;
   int nLevels;

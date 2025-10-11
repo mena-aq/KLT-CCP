@@ -46,10 +46,15 @@ example3: libklt.a
 	$(CC) -O3 $(CFLAGS) -o $@ $@.c -L. -lklt $(LIB) -lm
 	
 run: example3
-	./example3 $(DATASET)
-	gprof ./example3 > profile.txt
-	gprof ./example3 | python3 gprof2dot.py | dot -Tpng -o callgraph.png
-	@echo "Profiling complete: profile.txt and callgraph.png generated"
+ifeq ($(DEBUG),1)
+    ./example3 $(DATASET)
+    @echo "Run complete (DEBUG mode, no profiling)"
+else
+    ./example3 $(DATASET)
+    gprof ./example3 > profile.txt
+    gprof ./example3 | python3 gprof2dot.py | dot -Tpng -o callgraph.png
+    @echo "Profiling complete: profile.txt and callgraph.png generated"
+endif
 
 depend:
 	makedepend $(ARCH) $(EXAMPLES)
