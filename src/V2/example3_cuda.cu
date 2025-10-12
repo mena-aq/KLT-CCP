@@ -9,6 +9,7 @@
 #include "klt.h"
 
 #include "trackFeatures_cuda.h"
+#include "convolve_cuda.h"
 
 void KLTAllocateFeatureList(KLT_FeatureList** d_fl, int nFeatures){
   int nbytes = sizeof(KLT_FeatureListRec) +

@@ -9,15 +9,13 @@
 /* Our includes */
 #include "base.h"
 #include "error.h"
-#include "convolve.h"	/* for computing pyramid */
+#include "convolve_cuda.h"	/* for computing pyramid */
 #include "klt.h"
 #include "klt_util.h"	/* _KLT_FloatImage */
 #include "pyramid.h"	/* _KLT_Pyramid */
 
-
 __global__ void convolveImageHorizontalKernel();
 __global__ void convolveImageVerticalKernel();
-
 
 __device__ float interpolate(
 	float x,
