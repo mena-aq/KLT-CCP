@@ -9,7 +9,6 @@
 #include "klt.h"
 
 #include "trackFeatures_cuda.h"
-#include "convolve_cuda.h"
 
 void KLTAllocateFeatureList(KLT_FeatureList** d_fl, int nFeatures){
   int nbytes = sizeof(KLT_FeatureListRec) +
@@ -116,11 +115,12 @@ int main(int argc, char *argv[])
 
     kltTrackFeaturesCUDA(
       tc, img1, img2, fl,
-      d_tc, d_img1, d_img2, ncols, nrows, d_fl
+      d_tc, d_img1, d_img2, d_fl,
+      ncols, nrows
     );
-    // or i can copy back to fl here
+    // copy d_fl to fl
+    cudaMemcpy(fl, d_fl, sizeof(KLT_FeatureListRec) + nFeatures * sizeof(KLT_Feature) + nFeatures * sizeof(KLT_FeatureRec), cudaMemcpyDeviceToHost);
 
-    
 
 #ifdef REPLACE
     KLTReplaceLostFeatures(tc, img2, ncols, nrows, fl);

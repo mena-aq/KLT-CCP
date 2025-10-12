@@ -1,32 +1,17 @@
-/*********************************************************************
- * convolve_cuda.cu
- *********************************************************************/
-
-/*********************************************************************
- * Naive CUDA implementation of horizontal/vertical separable
- * convolution. This file intentionally keeps the kernels simple:
- * one thread per pixel, no shared-memory or other optimizations.
- *********************************************************************/
-
 /* Standard includes */
 #include <assert.h>
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
 
-/* CUDA runtime */
-#include <cuda_runtime.h>
-
-/* Our includes */
 #include "base.h"
 #include "error.h"
-#include "convolve_cuda.h"
+#include "convolve.h"
 #include "klt_util.h"
 
-/* Kernels state (kept on host as before) */
-static ConvolutionKernel gauss_kernel;
-static ConvolutionKernel gaussderiv_kernel;
-static float sigma_last = -10.0f;
+/* CUDA Implementation */
+#include "convolve_cuda.h"
+
 
 /* Small helper for CUDA errors */
 static void checkCuda(cudaError_t err, const char *msg)
@@ -36,84 +21,6 @@ static void checkCuda(cudaError_t err, const char *msg)
     exit(1);
   }
 }
-
-/*********************************************************************
- * CPU helpers kept from original implementation
- */
-
-static void _computeKernels(
-  float sigma,
-  ConvolutionKernel *gauss,
-  ConvolutionKernel *gaussderiv)
-{
-  const float factor = 0.01f;   /* for truncating tail */
-  int i;
-
-  assert(MAX_KERNEL_WIDTH % 2 == 1);
-  assert(sigma >= 0.0f);
-
-  /* Compute kernels, and automatically determine widths */
-  {
-    const int hw = MAX_KERNEL_WIDTH / 2;
-    float max_gauss = 1.0f, max_gaussderiv = (float) (sigma*exp(-0.5f));
-
-    /* Compute gauss and deriv */
-    for (i = -hw ; i <= hw ; i++)  {
-      gauss->data[i+hw]      = (float) exp(-i*i / (2*sigma*sigma));
-      gaussderiv->data[i+hw] = -i * gauss->data[i+hw];
-    }
-
-    /* Compute widths */
-    gauss->width = MAX_KERNEL_WIDTH;
-    for (i = -hw ; fabs(gauss->data[i+hw] / max_gauss) < factor ; 
-          i++, gauss->width -= 2);
-    gaussderiv->width = MAX_KERNEL_WIDTH;
-    for (i = -hw ; fabs(gaussderiv->data[i+hw] / max_gaussderiv) < factor ; 
-          i++, gaussderiv->width -= 2);
-    if (gauss->width == MAX_KERNEL_WIDTH || 
-        gaussderiv->width == MAX_KERNEL_WIDTH)
-      KLTError("(_computeKernels) MAX_KERNEL_WIDTH %d is too small for "
-                "a sigma of %f", MAX_KERNEL_WIDTH, sigma);
-  }
-
-  /* Shift if width less than MAX_KERNEL_WIDTH */
-  for (i = 0 ; i < gauss->width ; i++)
-    gauss->data[i] = gauss->data[i+(MAX_KERNEL_WIDTH-gauss->width)/2];
-  for (i = 0 ; i < gaussderiv->width ; i++)
-    gaussderiv->data[i] = gaussderiv->data[i+(MAX_KERNEL_WIDTH-gaussderiv->width)/2];
-  /* Normalize gauss and deriv */
-  {
-    const int hw = gaussderiv->width / 2;
-    float den;
-    
-    den = 0.0f;
-    for (i = 0 ; i < gauss->width ; i++)  den += gauss->data[i];
-    for (i = 0 ; i < gauss->width ; i++)  gauss->data[i] /= den;
-    den = 0.0f;
-    for (i = -hw ; i <= hw ; i++)  den -= i*gaussderiv->data[i+hw];
-    for (i = -hw ; i <= hw ; i++)  gaussderiv->data[i+hw] /= den;
-  }
-
-  sigma_last = sigma;
-}
-
-void _KLTGetKernelWidths(
-  float sigma,
-  int *gauss_width,
-  int *gaussderiv_width)
-{
-  _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
-  *gauss_width = gauss_kernel.width;
-  *gaussderiv_width = gaussderiv_kernel.width;
-}
-
-/*********************************************************************
- * CUDA device kernels (naive)
- * - convolveHorizKernel: computes horizontal convolution per-pixel
- * - convolveVertKernel: computes vertical convolution per-pixel
- *
- * Both kernels expect kernel data to be available in device memory.
- */
 
 __global__ void convolveHorizKernel(const float *imgin, float *imgout,
                                     int ncols, int nrows,
@@ -164,13 +71,17 @@ __global__ void convolveVertKernel(const float *imgin, float *imgout,
 }
 
 
-/* Host wrappers that allocate device memory, copy inputs, launch kernel,
-    and copy back result. These are intentionally simple and naive. */
-
-static void launchConvolveHoriz(const float *h_imgin, float *h_imgout,
-                                int ncols, int nrows,
-                                const float *h_kernel, int kwidth)
+__host__ void convolveImageHorizCUDA(
+  _KLT_FloatImage imgin,
+  ConvolutionKernel kernel,
+  _KLT_FloatImage imgout)
 {
+  /* Basic checks to match original behavior */
+  assert(kernel.width % 2 == 1);
+  assert(imgin != imgout);
+  assert(imgout->ncols >= imgin->ncols);
+  assert(imgout->nrows >= imgin->nrows);
+
   size_t npix = (size_t)ncols * nrows;
   size_t img_bytes = npix * sizeof(float);
   size_t kernel_bytes = kwidth * sizeof(float);
@@ -183,10 +94,10 @@ static void launchConvolveHoriz(const float *h_imgin, float *h_imgout,
   checkCuda(cudaMemcpy(d_imgin, h_imgin, img_bytes, cudaMemcpyHostToDevice), "copy imgin");
   checkCuda(cudaMemcpy(d_kernel, h_kernel, kernel_bytes, cudaMemcpyHostToDevice), "copy kernel");
 
-  dim3 block(16, 16);
-  dim3 grid((ncols + block.x - 1)/block.x, (nrows + block.y - 1)/block.y);
+  dim3 blockSize(16, 16);
+  dim3 gridSize((ncols + blockSize.x - 1)/blockSize.x, (nrows + blockSize.y - 1)/blockSize.y);
 
-  convolveHorizKernel<<<grid, block>>>(d_imgin, d_imgout, ncols, nrows, d_kernel, kwidth);
+  convolveHorizKernel<<<gridSize, blockSize>>>(d_imgin, d_imgout, ncols, nrows, d_kernel, kwidth);
   checkCuda(cudaGetLastError(), "kernel launch horiz");
   checkCuda(cudaDeviceSynchronize(), "synchronize horiz");
 
@@ -195,12 +106,20 @@ static void launchConvolveHoriz(const float *h_imgin, float *h_imgout,
   cudaFree(d_imgin);
   cudaFree(d_imgout);
   cudaFree(d_kernel);
+
 }
 
-static void launchConvolveVert(const float *h_imgin, float *h_imgout,
-                                int ncols, int nrows,
-                                const float *h_kernel, int kwidth)
+
+__host__ void convolveImageVertCUDA(
+  _KLT_FloatImage imgin,
+  ConvolutionKernel kernel,
+  _KLT_FloatImage imgout)
 {
+  /* Basic checks to match original behavior */
+  assert(kernel.width % 2 == 1);
+  assert(imgin != imgout);
+  assert(imgout->ncols >= imgin->ncols);
+  assert(imgout->nrows >= imgin->nrows);
   size_t npix = (size_t)ncols * nrows;
   size_t img_bytes = npix * sizeof(float);
   size_t kernel_bytes = kwidth * sizeof(float);
@@ -213,10 +132,10 @@ static void launchConvolveVert(const float *h_imgin, float *h_imgout,
   checkCuda(cudaMemcpy(d_imgin, h_imgin, img_bytes, cudaMemcpyHostToDevice), "copy imgin");
   checkCuda(cudaMemcpy(d_kernel, h_kernel, kernel_bytes, cudaMemcpyHostToDevice), "copy kernel");
 
-  dim3 block(16, 16);
-  dim3 grid((ncols + block.x - 1)/block.x, (nrows + block.y - 1)/block.y);
+  dim3 blockSize(16, 16);
+  dim3 gridSize((ncols + blockSize.x - 1)/blockSize.x, (nrows + blockSize.y - 1)/blockSize.y);
 
-  convolveVertKernel<<<grid, block>>>(d_imgin, d_imgout, ncols, nrows, d_kernel, kwidth);
+  convolveVertKernel<<<gridSize, blockSize>>>(d_imgin, d_imgout, ncols, nrows, d_kernel, kwidth);
   checkCuda(cudaGetLastError(), "kernel launch vert");
   checkCuda(cudaDeviceSynchronize(), "synchronize vert");
 
@@ -228,44 +147,7 @@ static void launchConvolveVert(const float *h_imgin, float *h_imgout,
 }
 
 
-/* Public functions that replace the old CPU implementations but keep the
-    same function signatures so other code can remain unchanged. */
-
-void _convolveImageHoriz(
-  _KLT_FloatImage imgin,
-  ConvolutionKernel kernel,
-  _KLT_FloatImage imgout)
-{
-  /* Basic checks to match original behavior */
-  assert(kernel.width % 2 == 1);
-  assert(imgin != imgout);
-  assert(imgout->ncols >= imgin->ncols);
-  assert(imgout->nrows >= imgin->nrows);
-
-  launchConvolveHoriz(imgin->data, imgout->data, imgin->ncols, imgin->nrows,
-                      kernel.data, kernel.width);
-}
-
-void _convolveImageVert(
-  _KLT_FloatImage imgin,
-  ConvolutionKernel kernel,
-  _KLT_FloatImage imgout)
-{
-  /* Basic checks to match original behavior */
-  assert(kernel.width % 2 == 1);
-  assert(imgin != imgout);
-  assert(imgout->ncols >= imgin->ncols);
-  assert(imgout->nrows >= imgin->nrows);
-
-  launchConvolveVert(imgin->data, imgout->data, imgin->ncols, imgin->nrows,
-                      kernel.data, kernel.width);
-}
-
-
-/* The rest of the original API (convolution orchestration) stays the same
-    and reuses the new GPU-enabled functions. */
-
-static void _convolveSeparate(
+__host__ void convolveSeparateCUDA(
   _KLT_FloatImage imgin,
   ConvolutionKernel horiz_kernel,
   ConvolutionKernel vert_kernel,
@@ -275,15 +157,77 @@ static void _convolveSeparate(
   _KLT_FloatImage tmpimg;
   tmpimg = _KLTCreateFloatImage(imgin->ncols, imgin->nrows);
 
-  /* Do convolution (now on GPU) */
-  _convolveImageHoriz(imgin, horiz_kernel, tmpimg);
-  _convolveImageVert(tmpimg, vert_kernel, imgout);
+  convolveImageHorizCUDA(imgin, horiz_kernel, tmpimg);
+  convolveImageVertCUDA(tmpimg, vert_kernel, imgout);
 
   /* Free memory */
   _KLTFreeFloatImage(tmpimg);
 }
 
-void _KLTComputeGradients(
+__host__ void computeSmoothedImageCUDA(
+  _KLT_FloatImage img,
+  float sigma,
+  _KLT_FloatImage smooth)
+{
+  /* Output image must be large enough to hold result */
+  assert(smooth->ncols >= img->ncols);
+  assert(smooth->nrows >= img->nrows);
+
+  /* Compute kernel, if necessary; gauss_deriv is not used */
+  if (fabsf(sigma - sigma_last) > 0.05f)
+    _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
+
+  convolveSeparateCUDA(img, gauss_kernel, gauss_kernel, smooth);
+}
+
+__host__ void computePyramidCUDA(
+  _KLT_FloatImage img, 
+  _KLT_Pyramid pyramid,
+  float sigma_fact)
+{
+  _KLT_FloatImage currimg, tmpimg;
+  int ncols = img->ncols, nrows = img->nrows;
+  int subsampling = pyramid->subsampling;
+  int subhalf = subsampling / 2;
+  float sigma = subsampling * sigma_fact;  /* empirically determined */
+  int oldncols;
+  int i, x, y;
+	
+  if (subsampling != 2 && subsampling != 4 && 
+      subsampling != 8 && subsampling != 16 && subsampling != 32)
+    KLTError("(_KLTComputePyramid)  Pyramid's subsampling must "
+             "be either 2, 4, 8, 16, or 32");
+
+  assert(pyramid->ncols[0] == img->ncols);
+  assert(pyramid->nrows[0] == img->nrows);
+
+  /* Copy original image to level 0 of pyramid */
+  memcpy(pyramid->img[0]->data, img->data, ncols*nrows*sizeof(float));
+
+  currimg = img;
+  for (i = 1 ; i < pyramid->nLevels ; i++)  {
+    tmpimg = _KLTCreateFloatImage(ncols, nrows);
+
+    computeSmoothedImageCUDA(currimg, sigma, tmpimg);
+
+    /* Subsample */
+    // downsample with the smoothed img
+    oldncols = ncols;
+    ncols /= subsampling;  nrows /= subsampling;
+    for (y = 0 ; y < nrows ; y++)
+      for (x = 0 ; x < ncols ; x++)
+        pyramid->img[i]->data[y*ncols+x] = 
+          tmpimg->data[(subsampling*y+subhalf)*oldncols +
+                      (subsampling*x+subhalf)];
+
+    /* Reassign current image */
+    currimg = pyramid->img[i]; //curr image for next level is the current level img
+				
+    _KLTFreeFloatImage(tmpimg);
+  }
+}
+
+__host__ void computeGradientsCUDA(
   _KLT_FloatImage img,
   float sigma,
   _KLT_FloatImage gradx,
@@ -299,26 +243,11 @@ void _KLTComputeGradients(
   if (fabsf(sigma - sigma_last) > 0.05f)
     _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
 
-  _convolveSeparate(img, gaussderiv_kernel, gauss_kernel, gradx);
-  _convolveSeparate(img, gauss_kernel, gaussderiv_kernel, grady);
+  convolveSeparateCUDA(img, gaussderiv_kernel, gauss_kernel, gradx);
+  convolveSeparateCUDA(img, gauss_kernel, gaussderiv_kernel, grady);
 }
 
 
-void _KLTComputeSmoothedImage(
-  _KLT_FloatImage img,
-  float sigma,
-  _KLT_FloatImage smooth)
-{
-  /* Output image must be large enough to hold result */
-  assert(smooth->ncols >= img->ncols);
-  assert(smooth->nrows >= img->nrows);
-
-  /* Compute kernel, if necessary; gauss_deriv is not used */
-  if (fabsf(sigma - sigma_last) > 0.05f)
-    _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
-
-  _convolveSeparate(img, gauss_kernel, gauss_kernel, smooth);
-}
 
 
 
