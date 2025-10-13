@@ -1,6 +1,11 @@
 #ifndef _CONVOLVE_CUDA_H_
 #define _CONVOLVE_CUDA_H_
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Standard includes */
 #include <assert.h>
 #include <math.h>
@@ -15,7 +20,6 @@
 #include "convolve.h"
 
 #include <cuda.h>
-
 
 static void checkCuda(cudaError_t err, const char *msg);
 
@@ -108,5 +112,8 @@ void _KLTComputeSmoothedImage(
   float sigma,
   _KLT_FloatImage smooth);
 
+#ifdef __cplusplus
+}
+#endif
 
 #endif

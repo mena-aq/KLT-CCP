@@ -5,6 +5,10 @@
 #ifndef _PNMIO_H_
 #define _PNMIO_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdio.h>
 
 /**********
@@ -53,4 +57,7 @@ void ppmWrite(
   int ncols,
   int nrows);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

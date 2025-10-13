@@ -5,6 +5,10 @@
 #ifndef _KLT_UTIL_H_
 #define _KLT_UTIL_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct  {
   int ncols;
   int nrows;
@@ -32,6 +36,9 @@ void _KLTWriteAbsFloatImageToPGM(
   _KLT_FloatImage img,
   char *filename,float scale);
 
+#ifdef __cplusplus
+}
+#endif
 #endif
 
 

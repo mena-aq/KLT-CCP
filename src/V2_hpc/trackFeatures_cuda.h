@@ -1,6 +1,10 @@
 #ifndef _TRACKFEATURES_CUDA_H_
 #define _TRACKFEATURES_CUDA_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Standard includes */
 #include <assert.h>
 #include <math.h>		/* fabs() */
@@ -70,7 +74,9 @@ __host__ void kltTrackFeaturesCUDA(
 );
 
 
-
+#ifdef __cplusplus
+}
+#endif
 
 
 #endif

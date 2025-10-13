@@ -5,6 +5,10 @@
 #ifndef _CONVOLVE_H_
 #define _CONVOLVE_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "klt.h"
 #include "klt_util.h"
 
@@ -43,6 +47,8 @@ void _KLTComputeSmoothedImage(
   float sigma,
   _KLT_FloatImage smooth);
 
-
+#ifdef __cplusplus
+}
+#endif
 
 #endif
