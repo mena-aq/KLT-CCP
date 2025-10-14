@@ -1,7 +1,6 @@
 #ifndef _CONVOLVE_CUDA_H_
 #define _CONVOLVE_CUDA_H_
 
-<<<<<<< HEAD
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,12 +19,7 @@ extern "C" {
 #include "pyramid.h"
 #include "convolve.h"
 
-#include <cuda_runtime.h>
-=======
-#include "klt.h"
-#include "klt_util.h"
 #include <cuda.h>
->>>>>>> ccdb4529dea683aad92f3e6b92afae7a5528249f
 
 static void checkCuda(cudaError_t err, const char *msg);
 
@@ -47,7 +41,6 @@ __global__ void convolveVertKernel(
   int kwidth
 );
 
-<<<<<<< HEAD
 __host__ void convolveImageHorizCUDA(
   _KLT_FloatImage imgin,
   ConvolutionKernel kernel,
@@ -64,18 +57,6 @@ __host__ void convolveImageVertCUDA(
   int ncols,
   int nrows,
   int kwidth
-=======
-__host__ void _convolveImageHorizCUDA(
-  _KLT_FloatImage imgin,
-  ConvolutionKernel kernel,
-  _KLT_FloatImage imgout
-);
-
-__host__ void _convolveImageVertCUDA(
-  _KLT_FloatImage imgin,
-  ConvolutionKernel kernel,
-  _KLT_FloatImage imgout
->>>>>>> ccdb4529dea683aad92f3e6b92afae7a5528249f
 );
 
 __host__ void convolveSeperateCUDA(
@@ -98,7 +79,6 @@ __host__ void computePyramidCUDA(
 );
 
 __host__ void computeGradientsCUDA(
-<<<<<<< HEAD
   _KLT_FloatImage img,
   float sigma,
   _KLT_FloatImage gradx,
@@ -137,10 +117,3 @@ void _KLTComputeSmoothedImage(
 #endif
 
 #endif
-=======
-  _KLT_FloatImage d_img,
-  _KLT_FloatImage d_gradx,
-  _KLT_FloatImage d_grady);
-
-#endif
->>>>>>> ccdb4529dea683aad92f3e6b92afae7a5528249f
