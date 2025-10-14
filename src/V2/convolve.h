@@ -5,8 +5,26 @@
 #ifndef _CONVOLVE_H_
 #define _CONVOLVE_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "klt.h"
 #include "klt_util.h"
+
+#define MAX_KERNEL_WIDTH 	71
+
+
+typedef struct  {
+  int width;
+  float data[MAX_KERNEL_WIDTH];
+}  ConvolutionKernel;
+
+/* Kernels */
+static ConvolutionKernel gauss_kernel;
+static ConvolutionKernel gaussderiv_kernel;
+static float sigma_last = -10.0;
+
 
 void _KLTToFloatImage(
   KLT_PixelType *img,
@@ -28,5 +46,9 @@ void _KLTComputeSmoothedImage(
   _KLT_FloatImage img,
   float sigma,
   _KLT_FloatImage smooth);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

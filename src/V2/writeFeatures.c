@@ -740,4 +740,3 @@ KLT_FeatureTable KLTReadFeatureTable(
 
   return ft;
 }
-

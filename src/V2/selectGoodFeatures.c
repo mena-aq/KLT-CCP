@@ -539,5 +539,3 @@ void KLTReplaceLostFeatures(
     fflush(stderr);
   }
 }
-
-

@@ -236,9 +236,3 @@ KLT_FeatureTable KLTReadFeatureTable(
 #endif
 
 #endif
-
-
-
-
-
-

@@ -1,68 +1,47 @@
-######################################################################
-# Choose your favorite C compiler
-CC = gcc
+%%writefile Makefile
+
+#####################################################################
+# Compilers
+NVCC = nvcc
 
 ######################################################################
-# -DNDEBUG prevents the assert() statements from being included in 
-# the code.  If you are having problems running the code, you might 
-# want to comment this line to see if an assert() statement fires.
+# Flags
 FLAG1 = -DNDEBUG
+CFLAGS = $(FLAG1)
+NVCCFLAGS = -O3 -Wno-deprecated-gpu-targets -diag-suppress 2464
+CUDA_LIB = -lcudart
+CUDA_INCLUDE = -I/opt/nvidia/hpc_sdk/Linux_x86_64/25.7/cuda/12.9/include
+CUDA_LIBDIR = -L/opt/nvidia/hpc_sdk/Linux_x86_64/25.7/cuda/12.9/targets/x86_64-linux/lib
 
 ######################################################################
-# -DKLT_USE_QSORT forces the code to use the standard qsort() 
-# routine.  Otherwise it will use a quicksort routine that takes
-# advantage of our specific data structure to greatly reduce the
-# running time on some machines.  Uncomment this line if for some
-# reason you are unhappy with the special routine.
-# FLAG2 = -DKLT_USE_QSORT
-
-######################################################################
-# Add your favorite C flags here.
-CFLAGS = $(FLAG1) $(FLAG2) -pg
-
-
-######################################################################
-# There should be no need to modify anything below this line (but
-# feel free to if you want).
-
+# Source files
 EXAMPLES = example3.c
 ARCH = convolve.c error.c pnmio.c pyramid.c selectGoodFeatures.c \
        storeFeatures.c trackFeatures.c klt.c klt_util.c writeFeatures.c
-LIB = -L/usr/local/lib -L/usr/lib
+CUDA_SRCS = convolve_cuda.cu trackFeatures_cuda.cu
+OBJECTS = $(ARCH:.c=.o) $(CUDA_SRCS:.cu=.o)
 
-.SUFFIXES:  .c .o
+.SUFFIXES: .c .cu .o
 
-all:  lib $(EXAMPLES:.c=)
+all: lib example3
 
 .c.o:
-	$(CC) -c $(CFLAGS) $<
+	$(NVCC) -c $(NVCCFLAGS) $(CUDA_INCLUDE) $< -o $@
 
-lib: $(ARCH:.c=.o)
+.cu.o:
+	$(NVCC) -c $(NVCCFLAGS) $(CUDA_INCLUDE) $< -o $@
+
+lib: $(OBJECTS)
 	rm -f libklt.a
-	ar ruv libklt.a $(ARCH:.c=.o)
-	rm -f *.o
+	ar ruv libklt.a $(OBJECTS)
+	ranlib libklt.a
 
 example3: libklt.a
-	$(CC) -O3 $(CFLAGS) -o $@ $@.c -L. -lklt $(LIB) -lm
-	
-run: example3
-ifeq ($(DEBUG),1)
-    ./example3 $(DATASET)
-    @echo "Run complete (DEBUG mode, no profiling)"
-else
-    ./example3 $(DATASET)
-    gprof ./example3 > profile.txt
-    gprof ./example3 | python3 gprof2dot.py | dot -Tpng -o callgraph.png
-    @echo "Profiling complete: profile.txt and callgraph.png generated"
-endif
+	$(NVCC) $(NVCCFLAGS) $(CUDA_INCLUDE) -o $@ example3.c -L. -lklt $(CUDA_LIBDIR) -lm $(CUDA_LIB)
 
-depend:
-	makedepend $(ARCH) $(EXAMPLES)
+run: example3
+	./example3
 
 clean:
-	rm -f *.o *.a $(EXAMPLES:.c=) *.tar *.tar.gz libklt.a \
-	      feat*.ppm features.ft features.txt gmon.out profile.txt callgraph.png output/*
-	rm -rf output
-
-
-
+	rm -f *.o *.a example3 *.tar *.tar.gz libklt.a \
+	      feat*.ppm features.ft features.txt gmon.out profile.txt callgraph.png

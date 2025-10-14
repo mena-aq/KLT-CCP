@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "pyramid.h": "c",
+        "string.h": "c"
+    }
+}

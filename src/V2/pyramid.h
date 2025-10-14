@@ -5,6 +5,10 @@
 #ifndef _PYRAMID_H_
 #define _PYRAMID_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "klt_util.h"
 
 // pyramid basically contains multiple images at different scales
@@ -33,4 +37,7 @@ void _KLTComputePyramid(
 void _KLTFreePyramid(
   _KLT_Pyramid pyramid);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

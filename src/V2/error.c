@@ -53,4 +53,3 @@ void KLTWarning(char *fmt, ...)
   fflush(stderr);
   va_end(args);
 }
-

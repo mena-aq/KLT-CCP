@@ -329,5 +329,3 @@ void ppmWriteFileRGB(
   /* Close file */
   fclose(fp);
 }
-
-

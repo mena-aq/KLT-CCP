@@ -13,18 +13,6 @@
 #include "convolve.h"
 #include "klt_util.h"   /* printing */
 
-#define MAX_KERNEL_WIDTH 	71
-
-
-typedef struct  {
-  int width;
-  float data[MAX_KERNEL_WIDTH];
-}  ConvolutionKernel;
-
-/* Kernels */
-static ConvolutionKernel gauss_kernel;
-static ConvolutionKernel gaussderiv_kernel;
-static float sigma_last = -10.0;
 
 
 /*********************************************************************
@@ -313,6 +301,3 @@ void _KLTComputeSmoothedImage(
 
   _convolveSeparate(img, gauss_kernel, gauss_kernel, smooth);
 }
-
-
-

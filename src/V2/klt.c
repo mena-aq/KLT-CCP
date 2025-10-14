@@ -526,6 +526,3 @@ void KLTSetVerbosity(
 {
   KLT_verbose = verbosity;
 }
-
-
-

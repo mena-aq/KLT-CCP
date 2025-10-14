@@ -1397,7 +1397,7 @@ void KLTTrackFeatures(
 		/* Only track features that are not lost */
 		if (featurelist->feature[indx]->val >= 0)  {
 
-			xloc = featurelist->feature[indx]->x;
+			xloc = featurelist->feature[indx]->x; //old location
 			yloc = featurelist->feature[indx]->y;
 
 			/* Transform location to coarsest resolution */
@@ -1582,5 +1582,3 @@ void KLTTrackFeatures(
 	}
 
 }
-
-

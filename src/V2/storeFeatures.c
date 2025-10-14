@@ -114,4 +114,3 @@ void KLTExtractFeatureHistory(
     fh->feature[frame]->val = ft->feature[feat][frame]->val;
   }
 }
-

@@ -13,6 +13,7 @@ saved to a text file; each feature list is also written to a PPM file.
 #include "pnmio.h"
 #include "klt.h"
 
+#include "trackFeatures_cuda.h"
 
 // Function to count image files in dataset folder 
 int count_image_files(const char* folder_path) {
@@ -46,13 +47,13 @@ int main(int argc, char *argv[])
 {
   unsigned char *img1, *img2;
   char fnamein[100], fnameout[100];
-  char dataset_folder[200] = "dataset3"; // default folder
+  char dataset_folder[200] = "/kaggle/input/dataset3/dataset3";
   char output_folder[200] = "output";
 
   KLT_TrackingContext tc;
   KLT_FeatureList fl;
   KLT_FeatureTable ft;
-  int nFeatures = 550, nFrames;
+  int nFeatures = 150, nFrames=10;
   int ncols, nrows;
   int i;
 
@@ -65,7 +66,7 @@ int main(int argc, char *argv[])
   }
 
   // count the number of image files in the dataset folder
-  nFrames = count_image_files(dataset_folder);
+ // nFrames = count_image_files(dataset_folder);
   if (nFrames <= 0) {
     printf("Error: No image files found in %s or cannot access folder\n", dataset_folder);
     return -1;
@@ -92,7 +93,9 @@ int main(int argc, char *argv[])
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
     pgmReadFile(fnamein, img2, &ncols, &nrows);
-    KLTTrackFeatures(tc, img1, img2, ncols, nrows, fl);
+    //KLTTrackFeatures(tc, img1, img2, ncols, nrows, fl);
+    kltTrackFeaturesCUDA(tc, img1, img2, ncols, nrows, fl);
+
 #ifdef REPLACE
     KLTReplaceLostFeatures(tc, img2, ncols, nrows, fl);
 #endif
@@ -112,4 +115,3 @@ int main(int argc, char *argv[])
 
   return 0;
 }
-
