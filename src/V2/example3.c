@@ -66,7 +66,7 @@ int main(int argc, char *argv[])
   }
 
   // count the number of image files in the dataset folder
- // nFrames = count_image_files(dataset_folder);
+  nFrames = count_image_files(dataset_folder);
   if (nFrames <= 0) {
     printf("Error: No image files found in %s or cannot access folder\n", dataset_folder);
     return -1;

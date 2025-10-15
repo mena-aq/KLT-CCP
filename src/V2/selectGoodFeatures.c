@@ -19,6 +19,9 @@
 #include "klt_util.h"
 #include "pyramid.h"
 
+// do we want to use this in selectgoodfeatrures
+#include "convolve_cuda.h"
+
 int KLT_verbose = 1;
 
 typedef enum {SELECTING_ALL, REPLACING_SOME} selectionMode;
@@ -355,7 +358,10 @@ void _KLTSelectGoodFeatures(
       _KLT_FloatImage tmpimg;
       tmpimg = _KLTCreateFloatImage(ncols, nrows);
       _KLTToFloatImage(img, ncols, nrows, tmpimg);
-      _KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg);
+      /// ------------------ cuda ver ----------------------------
+      //_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg);
+      computeSmoothedImageCUDA(tmpimg, _KLTComputeSmoothSigma(tc), floatimg);
+      //-----------------------------------------------------------------
       _KLTFreeFloatImage(tmpimg);
     } else _KLTToFloatImage(img, ncols, nrows, floatimg);
  
