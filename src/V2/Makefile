@@ -1,5 +1,3 @@
-%%writefile Makefile
-
 #####################################################################
 # Compilers
 NVCC = nvcc
@@ -8,7 +6,7 @@ NVCC = nvcc
 # Flags
 FLAG1 = -DNDEBUG
 CFLAGS = $(FLAG1)
-NVCCFLAGS = -O3 -Wno-deprecated-gpu-targets -diag-suppress 2464
+NVCCFLAGS = -O3 -Wno-deprecated-gpu-targets -diag-suppress 2464 -gencode arch=compute_86,code=sm_86
 CUDA_LIB = -lcudart
 CUDA_INCLUDE = -I/opt/nvidia/hpc_sdk/Linux_x86_64/25.7/cuda/12.9/include
 CUDA_LIBDIR = -L/opt/nvidia/hpc_sdk/Linux_x86_64/25.7/cuda/12.9/targets/x86_64-linux/lib
