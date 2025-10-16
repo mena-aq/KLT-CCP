@@ -20,7 +20,7 @@
 #include "pyramid.h"
 
 // do we want to use this in selectgoodfeatrures
-#include "convolve_cuda.h"
+//#include "convolve_cuda.h"
 
 int KLT_verbose = 1;
 
@@ -359,8 +359,8 @@ void _KLTSelectGoodFeatures(
       tmpimg = _KLTCreateFloatImage(ncols, nrows);
       _KLTToFloatImage(img, ncols, nrows, tmpimg);
       /// ------------------ cuda ver ----------------------------
-      //_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg);
-      computeSmoothedImageCUDA(tmpimg, _KLTComputeSmoothSigma(tc), floatimg);
+      _KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg);
+      //computeSmoothedImageCUDA(tmpimg, _KLTComputeSmoothSigma(tc), floatimg);
       //-----------------------------------------------------------------
       _KLTFreeFloatImage(tmpimg);
     } else _KLTToFloatImage(img, ncols, nrows, floatimg);

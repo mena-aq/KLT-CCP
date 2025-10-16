@@ -1,5 +1,9 @@
-# include <cuda.h>
-#include <cuda_runtime.h>
+/**********************************************************************
+Finds the 150 best features in an image and tracks them through the 
+next two images.  The sequential mode is set in order to speed
+processing.  The features are stored in a feature table, which is then
+saved to a text file; each feature list is also written to a PPM file.
+**********************************************************************/
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -8,14 +12,7 @@
 #include <sys/stat.h>
 #include "pnmio.h"
 #include "klt.h"
-#include "trackFeatures_cuda.h"
 
-void KLTAllocateFeatureList(KLT_FeatureList* d_fl, int nFeatures){
-  int nbytes = sizeof(KLT_FeatureListRec) +
-    nFeatures * sizeof(KLT_Feature) +
-    nFeatures * sizeof(KLT_FeatureRec);
-  cudaMalloc((void**)&d_fl, nbytes);
-}
 
 // Function to count image files in dataset folder 
 int count_image_files(const char* folder_path) {
@@ -78,7 +75,7 @@ int main(int argc, char *argv[])
   tc = KLTCreateTrackingContext();
   fl = KLTCreateFeatureList(nFeatures);
   ft = KLTCreateFeatureTable(nFrames, nFeatures);
-  tc->sequentialMode = TRUE; // USES SEQUENTIAL MODE
+  tc->sequentialMode = TRUE;
   tc->writeInternalImages = FALSE;
   tc->affineConsistencyCheck = -1;  /* set this to 2 to turn on affine consistency check */
  
@@ -91,37 +88,10 @@ int main(int argc, char *argv[])
   sprintf(fnameout, "%s/feat0.ppm", output_folder);
   KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, fnameout);
 
-  // allocate memory for feature list
-  KLT_FeatureList d_fl;
-  KLTAllocateFeatureList(&d_fl, nFeatures);
-
-  // allocate memory for tracking context on device & copy to device
-  KLT_TrackingContext d_tc;
-  cudaMalloc((void**)&d_tc, sizeof(KLT_TrackingContextRec));
-  cudaMemcpy(d_tc, tc, sizeof(KLT_TrackingContextRec), cudaMemcpyHostToDevice);
-
-  // allocate device memory for 2 sequential frames
-  KLT_PixelType *d_img1, *d_img2;
-  cudaMalloc((void**)&d_img1, ncols * nrows * sizeof(KLT_PixelType));
-  cudaMalloc((void**)&d_img2, ncols * nrows * sizeof(KLT_PixelType));
-
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
     pgmReadFile(fnamein, img2, &ncols, &nrows);
-
-    // copy the 2 frames to track b/w to device
-    cudaMemcpy(d_img1, img1, ncols * nrows * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_img2, img2, ncols * nrows * sizeof(float), cudaMemcpyHostToDevice);
-
-    kltTrackFeaturesCUDA(
-      tc, img1, img2, fl,
-      d_tc, d_img1, d_img2, d_fl,
-      ncols, nrows
-    );
-    // copy d_fl to fl
-    cudaMemcpy(fl, d_fl, sizeof(KLT_FeatureListRec) + nFeatures * sizeof(KLT_Feature) + nFeatures * sizeof(KLT_FeatureRec), cudaMemcpyDeviceToHost);
-
-
+    KLTTrackFeatures(tc, img1, img2, ncols, nrows, fl);
 #ifdef REPLACE
     KLTReplaceLostFeatures(tc, img2, ncols, nrows, fl);
 #endif
@@ -129,7 +99,6 @@ int main(int argc, char *argv[])
     sprintf(fnameout, "%s/feat%d.ppm", output_folder, i);
     KLTWriteFeatureListToPPM(fl, img2, ncols, nrows, fnameout);
   }
-  
   KLTWriteFeatureTable(ft, "features.txt", "%5.1f");
   KLTWriteFeatureTable(ft, "features.ft", NULL);
 
@@ -141,6 +110,4 @@ int main(int argc, char *argv[])
 
   return 0;
 }
-
-
 

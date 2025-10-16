@@ -93,7 +93,6 @@ int main(int argc, char *argv[])
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
     pgmReadFile(fnamein, img2, &ncols, &nrows);
-    //KLTTrackFeatures(tc, img1, img2, ncols, nrows, fl);
     kltTrackFeaturesCUDA(tc, img1, img2, ncols, nrows, fl);
 
 #ifdef REPLACE

@@ -15,6 +15,9 @@ do {                                                                        \
     }                                                                       \
 } while (0)
 
+static inline int roundUp32(int x) {
+    return ((x + 31) / 32) * 32;
+}
 
 __host__ __device__ float sumAbsFloatWindowCUDA(
 	float* fw,
@@ -147,7 +150,7 @@ static DevicePyramidAlloc deepCopyPyramidToDevice(_KLT_Pyramid src) {
 	return out;
 }
 
-__global__ void trackFeatureKernelTest(
+__global__ void trackFeatureKernel(
     const float *d_pyramid1,
     const float *d_pyramid1_gradx,
     const float *d_pyramid1_grady,
@@ -187,6 +190,11 @@ __global__ void trackFeatureKernelTest(
 
     int hw = window_width / 2;
     int hh = window_height / 2;
+	int window_elems = window_width * window_height;
+
+    // Bounds check: skip threads outside the window
+    if (tid >= window_elems) return;
+
     int nPyramidLevels = getPyramidNLevels(d_pyramid1);
     float subsampling = getPyramidSubsampling(d_pyramid1);
     
@@ -349,256 +357,6 @@ __global__ void trackFeatureKernelTest(
     }
 }
 
-__global__ void trackFeatureKernel(
-	const float *d_pyramid1,
-	const float *d_pyramid1_gradx,
-	const float *d_pyramid1_grady,
-	const float *d_pyramid2,
-	const float *d_pyramid2_gradx,
-	const float *d_pyramid2_grady,
-	const float *d_in_x,
-	const float *d_in_y,
-	const int *d_in_val,
-	float *d_out_x,
-	float *d_out_y,
-	int *d_out_val,
-	int borderx,
-	int bordery,
-	int window_width,
-	int window_height,
-	float step_factor,
-	int max_iterations,
-	float small,
-	float th,
-	float max_residue
-)
-{
-
-    
-	int status;
-	int iteration = 0;
-	int hw = window_width / 2;
-	int hh = window_height / 2;
-  	float one_plus_eps = 1.001f;
-	int val = KLT_TRACKED;
-
-	int nPyramidLevels = getPyramidNLevels(d_pyramid1);
-	float subsampling = getPyramidSubsampling(d_pyramid1);
-
-	// which feature to track
-	int featureIdx = blockIdx.x;
-	// only track features that are not lost
-	if (d_in_val[featureIdx] < 0) {
-		// mark output as lost immediately
-		if (threadIdx.x == 0 && threadIdx.y == 0) {
-			d_out_x[featureIdx] = -1.0f;
-			d_out_y[featureIdx] = -1.0f;
-			d_out_val[featureIdx] = d_in_val[featureIdx];
-		}
-		return;
-	}
-
-	// Prepare per-feature coordinates from input arrays
-	float xloc = d_in_x[featureIdx];
-	float yloc = d_in_y[featureIdx];
-	float xlocout, ylocout;
-
-    //printf("Block %d,%d -> Tracking: (%d,%d)\n",blockIdx.x,blockIdx.y,xloc,yloc);
-    
-
-	// Thread ID
-	int tid = threadIdx.y * blockDim.x + threadIdx.x;
-
-	// shared memory allocation
-	extern __shared__ float shared[];
-	float* imgdiff = shared; //imgdiff: first part of shared memory
-	float* gradx = imgdiff + window_width * window_height; //gradx: second part of shared memory
-	float* grady = gradx + window_width * window_height; //grady: third part of shared memory
-
-	// Transform to coarsest
-	for (int rr = nPyramidLevels - 1; rr >= 0; --rr) {
-		xloc /= subsampling; yloc /= subsampling;
-	}
-	xlocout = xloc; ylocout = yloc;
-
-	// shared vars for x1,y1 dx,dy and final x2,y2 of feature
-	__shared__ float s_x1, s_y1;
-	__shared__ float s_dx, s_dy;
-	__shared__ float s_x2, s_y2;
-	__shared__ int s_status; // use KLT_* codes
-	__shared__ int s_continue;
-
-	if (tid == 0) {
-		s_x1 = xloc; s_y1 = yloc;
-		s_x2 = xlocout; s_y2 = ylocout; 
-		s_dx = 0.0f; s_dy = 0.0f; 
-		s_status = KLT_TRACKED; s_continue = 1;
-	}
-    // FOR DEBUGGING
-    if (tid == 0 && featureIdx == 0) {  // Debug first feature
-        // printf("[DEBUG] Feature %d: in=(%f,%f), pyramidLevels=%d, subsampling=%f\n", 
-        //        featureIdx, d_in_x[featureIdx], d_in_y[featureIdx], 
-        //        nPyramidLevels, subsampling);
-        for (int r = 0; r < nPyramidLevels; r++) {
-            // printf("Level %d: %dx%d\n", r, getPyramidNCols(d_pyramid1, r), 
-            //        getPyramidNRows(d_pyramid1, r));
-        }
-    }
-	__syncthreads();
-
-	for (int r = nPyramidLevels - 1; r >= 0; --r) {
-
-		// If already lost, skip levels
-		if (s_status != KLT_TRACKED) break;
-
-		// Scale coordinates 
-		if (tid == 0) {
-			s_x1 *= subsampling; s_y1 *= subsampling;
-			s_x2 *= subsampling; s_y2 *= subsampling;
-		}
-		__syncthreads();
-
-        /*
-        // bounds check again
-         if (tid == 0) {
-            if (outOfBoundsCUDA(s_x1, s_y1, d_pyramid1, r, borderx, bordery) ||
-                outOfBoundsCUDA(s_x2, s_y2, d_pyramid2, r, borderx, bordery)) {
-                s_status = KLT_OOB;
-                s_continue = 0;
-            }
-        }
-        */
-
-		// Each thread computes its window pixel
-		int i = threadIdx.x - hw;
-		int j = threadIdx.y - hh;
-		int idx = threadIdx.y * window_width + threadIdx.x;
-
-		// iterative refinement
-		iteration = 0;
-		s_continue = 1;
-		do {
-            // compute per-thread sample coordinates (pixel)
-            float samp_x1 = s_x1 + (float)i;
-            float samp_y1 = s_y1 + (float)j;
-            float samp_x2 = s_x2 + (float)i;
-            float samp_y2 = s_y2 + (float)j;
-
-			float i1 = interpolateCUDA(samp_x1, samp_y1, d_pyramid1, r);
-			float i2 = interpolateCUDA(samp_x2, samp_y2, d_pyramid2, r);
-			imgdiff[idx] = i1 - i2;
-
-			float gx1 = interpolateCUDA(samp_x1, samp_y1, d_pyramid1_gradx, r);
-			float gx2 = interpolateCUDA(samp_x2, samp_y2, d_pyramid2_gradx, r);
-			gradx[idx] = gx1 + gx2;
-			float gy1 = interpolateCUDA(samp_x1, samp_y1, d_pyramid1_grady, r);
-			float gy2 = interpolateCUDA(samp_x2, samp_y2, d_pyramid2_grady, r);
-			grady[idx] = gy1 + gy2;
-
-			__syncthreads();
-
-			if (tid == 0) {
-				// gradient matrix & error vector
-				float gxx = 0.0f, gxy = 0.0f, gyy = 0.0f, ex = 0.0f, ey = 0.0f;
-				int W = window_width * window_height;
-				for (int k = 0; k < W; ++k) {
-					float gx = gradx[k]; float gy = grady[k]; float diff = imgdiff[k];
-					gxx += gx*gx; gxy += gx*gy; gyy += gy*gy;
-					ex += diff * gx; ey += diff * gy;
-				}
-				ex *= step_factor; ey *= step_factor;
-				float det = gxx*gyy - gxy*gxy;
-				s_dx = 0.0f; s_dy = 0.0f;
-				// solve equation
-				if (det < small) {
-					s_status = KLT_SMALL_DET;
-					s_continue = 0; //if small det, stop
-				} else {
-					s_dx = (gyy*ex - gxy*ey)/det;
-					s_dy = (gxx*ey - gxy*ex)/det;
-					s_x2 += s_dx; s_y2 += s_dy;
-					// stop if step is small enough
-					s_continue = (fabsf(s_dx) >= th || fabsf(s_dy) >= th) ? 1 : 0;
-				}
-			}
-			__syncthreads();
-
-			iteration++;
-
-		} while (s_continue && iteration < max_iterations && s_status == KLT_TRACKED);
-
-
-        if (tid == 0 && blockIdx.x == 0) {
-            // printf("Tracked to %f, %f (s_status=%d)\n", s_x2, s_y2, s_status);
-        }
-
-
-		// Recompute intensity difference at final position for residue
-		float samp_x1_f = s_x1 + (float)i;
-		float samp_y1_f = s_y1 + (float)j;
-		float samp_x2_f = s_x2 + (float)i;
-		float samp_y2_f = s_y2 + (float)j;
-		imgdiff[idx] = interpolateCUDA(samp_x1_f, samp_y1_f, d_pyramid1, r) - interpolateCUDA(samp_x2_f, samp_y2_f, d_pyramid2, r);
-		__syncthreads();
-
-		if (tid == 0) {
-			int W = window_width * window_height;
-			float residue = sumAbsFloatWindowCUDA(imgdiff, window_width, window_height) / (float)W;
-			if (residue > max_residue) s_status = KLT_LARGE_RESIDUE;
-		}
-		__syncthreads();
-
-		if (s_status != KLT_TRACKED) break;
-	}
-
-	// record feature into output arrays
-	if (tid == 0) {
-		float final_x = s_x2;
-		float final_y = s_y2;
-		int final_val = KLT_TRACKED;
-
-        /*
-		// out-of-bounds check using final coordinates
-		if (final_x < borderx || final_x >= window_width - borderx ||
-			final_y < bordery || final_y >= window_height - bordery) {
-			final_val = KLT_OOB;
-		}
-        */
-        // should be:
-        if (tid == 0) {
-            // Get dimensions from finest pyramid level (level 0)
-            int nc = getPyramidNCols(d_pyramid1, 0);
-            int nr = getPyramidNRows(d_pyramid1, 0);
-            int hw = window_width / 2;
-            int hh = window_height / 2;
-            
-            if (final_x - hw < borderx || final_x + hw >= nc - borderx ||
-                final_y - hh < bordery || final_y + hh >= nr - bordery) {
-                final_val = KLT_OOB;
-            }
-        }
-
-		// Map shared status codes
-		if (s_status == KLT_SMALL_DET) final_val = KLT_SMALL_DET;
-		else if (s_status == KLT_LARGE_RESIDUE) final_val = KLT_LARGE_RESIDUE;
-		else if (s_status == KLT_MAX_ITERATIONS) final_val = KLT_MAX_ITERATIONS;
-
-		if (final_val != KLT_TRACKED) {
-			d_out_x[featureIdx] = -1.0f;
-			d_out_y[featureIdx] = -1.0f;
-			d_out_val[featureIdx] = final_val;
-		} else {
-			d_out_x[featureIdx] = final_x;
-			d_out_y[featureIdx] = final_y;
-			d_out_val[featureIdx] = KLT_TRACKED;
-		}
-	}
-
-	__syncthreads();
-	
-};
-
-
 __host__ void kltTrackFeaturesCUDA(
   KLT_TrackingContext h_tc,
   KLT_PixelType *h_img1,
@@ -619,11 +377,6 @@ __host__ void kltTrackFeaturesCUDA(
 	KLT_BOOL floatimg1_created = FALSE;
 	int i;
 
-	// allocate memory for tracking context on device & copy to device
-	//KLT_TrackingContext d_tc;
-	//cudaMalloc((void**)&d_tc, sizeof(KLT_TrackingContextRec));
-	//cudaMemcpy(d_tc, h_tc, sizeof(KLT_TrackingContextRec), cudaMemcpyHostToDevice);
-
 	// allocate device memory for 2 sequential frames
 	KLT_PixelType *d_img1, *d_img2;
 	CUDA_CHECK(cudaMalloc((void**)&d_img1, ncols * nrows * sizeof(KLT_PixelType)));
@@ -632,12 +385,6 @@ __host__ void kltTrackFeaturesCUDA(
     CUDA_CHECK(cudaMemcpy(d_img1, h_img1, ncols * nrows * sizeof(KLT_PixelType), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_img2, h_img2, ncols * nrows * sizeof(KLT_PixelType), cudaMemcpyHostToDevice));
 
-
-	if (KLT_verbose >= 1)  {
-		// fprintf(stderr,  "(KLT) Tracking %d features in a %d by %d image...  ",
-		// 	KLTCountRemainingFeatures(h_fl), ncols, nrows);
-		fflush(stderr);
-	}
 
 	/* Check window size (and correct if necessary) */
 	if (h_tc->window_width % 2 != 1) {
@@ -682,39 +429,23 @@ __host__ void kltTrackFeaturesCUDA(
 
 	} else  {
 
-    	// ------ this block is only executed ONCE in example3 for the first frame ------
 		floatimg1_created = TRUE;
 		floatimg1 = _KLTCreateFloatImage(ncols, nrows);
 		_KLTToFloatImage(h_img1, ncols, nrows, tmpimg);
 
-    	// ------------- convolve_seperate with Gaussian kernel (blur) ---------------
-		//_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(h_tc), floatimg1);
         computeSmoothedImageCUDA(tmpimg, _KLTComputeSmoothSigma(h_tc), floatimg1);
-
-
-    	//---------------------------------------------------------------------------
 
 		pyramid1 = _KLTCreatePyramid(ncols, nrows, (int) subsampling, h_tc->nPyramidLevels);
 
-		// ------------- calls ComputeSmoothedImage at each level which calls convolve_seperate ---------------
-    	//_KLTComputePyramid(floatimg1, pyramid1, h_tc->pyramid_sigma_fact);
     	computePyramidCUDA(floatimg1, pyramid1, h_tc->pyramid_sigma_fact);
-    	// --------------------------------------------------------------------------
 
 		pyramid1_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, h_tc->nPyramidLevels);
 		pyramid1_grady = _KLTCreatePyramid(ncols, nrows, (int) subsampling, h_tc->nPyramidLevels);
 
-    	// ------ calls convolve_seperate for both gradx and grady for each level ---------
 		for (i = 0 ; i < h_tc->nPyramidLevels ; i++)
-			//_KLTComputeGradients(pyramid1->img[i], h_tc->grad_sigma, 
-			//pyramid1_gradx->img[i], pyramid1_grady->img[i]);
             computeGradientsCUDA(pyramid1->img[i], h_tc->grad_sigma, 
 			pyramid1_gradx->img[i], pyramid1_grady->img[i]);
-    	// --------------------------------------------------------------------------
 
-        if (KLT_verbose>=1){
-            // printf("Pyramid for img1 prepared\n");
-        }
     
 	}
 
@@ -722,32 +453,19 @@ __host__ void kltTrackFeaturesCUDA(
 	floatimg2 = _KLTCreateFloatImage(ncols, nrows);
 	_KLTToFloatImage(h_img2, ncols, nrows, tmpimg);
 
-  	// ------------- convolve_seperate with Gaussian kernel (blur) ---------------
-	//_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(h_tc), floatimg2);
     computeSmoothedImageCUDA(tmpimg, _KLTComputeSmoothSigma(h_tc), floatimg2);
-	// --------------------------------------------------------------------------
 
   	pyramid2 = _KLTCreatePyramid(ncols, nrows, (int) subsampling, h_tc->nPyramidLevels);
 	
-  	// ------------- calls ComputeSmoothedImage at each level which calls convolve_seperate ---------------
-  	//_KLTComputePyramid(floatimg2, pyramid2, h_tc->pyramid_sigma_fact);
     computePyramidCUDA(floatimg2, pyramid2, h_tc->pyramid_sigma_fact);
-	// --------------------------------------------------------------------------
 
   	pyramid2_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, h_tc->nPyramidLevels);
 	pyramid2_grady = _KLTCreatePyramid(ncols, nrows, (int) subsampling, h_tc->nPyramidLevels);
 	
-  	// ------ calls convolve_seperate for both gradx and grady for each level ---------
   	for (i = 0 ; i < h_tc->nPyramidLevels ; i++)
-		//_KLTComputeGradients(pyramid2->img[i], h_tc->grad_sigma, 
-		//pyramid2_gradx->img[i], pyramid2_grady->img[i]);
         computeGradientsCUDA(pyramid2->img[i], h_tc->grad_sigma, 
 		pyramid2_gradx->img[i], pyramid2_grady->img[i]);
-  	// --------------------------------------------------------------------------
 
-    if (KLT_verbose>=1){
-        // printf("Pyramid for img2 prepared\n");
-    }
 
 	/* Write internal images */
 	if (h_tc->writeInternalImages)  {
@@ -776,16 +494,6 @@ __host__ void kltTrackFeaturesCUDA(
 	DevicePyramidAlloc d_pyramid2_gradx = deepCopyPyramidToDevice(pyramid2_gradx);
 	DevicePyramidAlloc d_pyramid2_grady = deepCopyPyramidToDevice(pyramid2_grady);
 
-    // check if copied
-    if (d_pyramid1.d_buffer == NULL) {
-        printf("ERROR: Failed to copy pyramid1 to device\n");
-        return;
-    }
-    if (KLT_verbose>=1){
-    //    printf("Device pyramids allocated, total size of pyramid1: %zu floats (%.2f MB)\n",
-    //    d_pyramid1.total_floats,
-    //    d_pyramid1.total_floats * sizeof(float) / (1024.0 * 1024.0));
-    } 
 
 	int window_width = h_tc->window_width;
 	int window_height = h_tc->window_height;
@@ -819,10 +527,6 @@ __host__ void kltTrackFeaturesCUDA(
 		h_in_val[i] = h_fl->feature[i]->val;
 	}
 
-    if (KLT_verbose>=1){
-        // printf("Copied feature list to flat buffers\n");
-        // printf("h_in_x[0]=%f\n",h_in_x[0]);
-    }
 
 	CUDA_CHECK(cudaMalloc((void**)&d_in_x, sizeof(float) * numFeatures));
 	CUDA_CHECK(cudaMalloc((void**)&d_in_y, sizeof(float) * numFeatures));
@@ -835,20 +539,14 @@ __host__ void kltTrackFeaturesCUDA(
 	CUDA_CHECK(cudaMemcpy(d_in_y, h_in_y, sizeof(float) * numFeatures, cudaMemcpyHostToDevice));
 	CUDA_CHECK(cudaMemcpy(d_in_val, h_in_val, sizeof(int) * numFeatures, cudaMemcpyHostToDevice));
 
-    if (KLT_verbose>=1){
-        // printf("Copied feature list buffers to device\n");
-    }
-
-	dim3 blockSize(window_width, window_height);
-	dim3 gridSize(numFeatures);
-	size_t sharedMemSize = window_width * window_height * sizeof(float) * 3; // for imgdiff, gradx, grady (3)
-	// printf("Block size:%d,%d\n",blockSize.x,blockSize.y);
-	// printf("Grid size:%d,%d\n",gridSize.x,gridSize.y);
-
+	int padded_window_width = roundUp32(window_width);
+    int padded_window_height = roundUp32(window_height);
+	dim3 blockSize(padded_window_width, padded_window_height);
+    dim3 gridSize(numFeatures);
 
 	// Launch kernel with feature arrays and packed pyramids
     // this is Test, if using prev version add sharedMemSize
-	trackFeatureKernelTest<<<gridSize, blockSize>>>(
+	trackFeatureKernel<<<gridSize, blockSize>>>(
 		d_pyramid1.d_buffer,
 		d_pyramid1_gradx.d_buffer,
 		d_pyramid1_grady.d_buffer,
@@ -923,14 +621,6 @@ __host__ void kltTrackFeaturesCUDA(
 	_KLTFreePyramid(pyramid1);
 	_KLTFreePyramid(pyramid1_gradx);
 	_KLTFreePyramid(pyramid1_grady);
-
-	if (KLT_verbose >= 1)  {
-		// fprintf(stderr,  "\n\t%d features successfully tracked.\n",
-		// 	KLTCountRemainingFeatures(h_fl));
-		// if (h_tc->writeInternalImages)
-		// 	fprintf(stderr,  "\tWrote images to 'kltimg_tf*.pgm'.\n");
-		fflush(stderr);
-	}
 
 
 }
