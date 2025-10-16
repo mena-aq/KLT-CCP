@@ -110,7 +110,7 @@ run:
 	
 
 profile_gpu:
-	nsys profile --stats=true ./example3_gpu > analysis.txt
+	nsys profile --stats=true ./example3_gpu $(DATASET) > analysis.txt
 	
 profile_cpu:
 	gprof ./example3_cpu > profile.txt
