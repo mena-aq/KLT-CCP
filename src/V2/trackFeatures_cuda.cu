@@ -436,9 +436,9 @@ __global__ void trackFeatureKernel(
 	}
     // FOR DEBUGGING
     if (tid == 0 && featureIdx == 0) {  // Debug first feature
-        printf("[DEBUG] Feature %d: in=(%f,%f), pyramidLevels=%d, subsampling=%f\n", 
-               featureIdx, d_in_x[featureIdx], d_in_y[featureIdx], 
-               nPyramidLevels, subsampling);
+        // printf("[DEBUG] Feature %d: in=(%f,%f), pyramidLevels=%d, subsampling=%f\n", 
+        //        featureIdx, d_in_x[featureIdx], d_in_y[featureIdx], 
+        //        nPyramidLevels, subsampling);
         for (int r = 0; r < nPyramidLevels; r++) {
             printf("Level %d: %dx%d\n", r, getPyramidNCols(d_pyramid1, r), 
                    getPyramidNRows(d_pyramid1, r));
