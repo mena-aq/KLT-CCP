@@ -1,4 +1,9 @@
 /**********************************************************************
+This is the GPU version of example3.c from the KLT library.
+It calls a cuda implementation of KLTTrackFeatures instead of the CPU version.
+/********************************************************************/
+
+/********************************************************************
 Finds the 150 best features in an image and tracks them through the 
 next two images.  The sequential mode is set in order to speed
 processing.  The features are stored in a feature table, which is then
@@ -89,10 +94,11 @@ int main(int argc, char *argv[])
   sprintf(fnameout, "%s/feat0.ppm", output_folder);
   KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, fnameout);
 
-  // ----- KLTTrackFeatures is called nFrames-1 times in a loop -----
+  // for each frame in the sequence... 
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
     pgmReadFile(fnamein, img2, &ncols, &nrows);
+    // track the features from img1 to img2 using CUDA implementation
     kltTrackFeaturesCUDA(tc, img1, img2, ncols, nrows, fl);
 
 #ifdef REPLACE

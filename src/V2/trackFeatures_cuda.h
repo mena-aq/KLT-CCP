@@ -23,12 +23,15 @@ extern "C" {
 #include <cuda.h>
 
 
+// CUDA version of sumAbsFloatWindow for GPU 
 __host__ __device__ float sumAbsFloatWindowCUDA(
 	float* fw,
 	int width,
 	int height
 );
 
+
+// device implementation of _interpolate
 __device__ float interpolateCUDA(
 	float x, 
 	float y, 
@@ -36,6 +39,9 @@ __device__ float interpolateCUDA(
 	int level
 );
 
+// CUDA kernel for tracking features
+// Tracks a singular feature point across two image pyramids
+// Each thread handles one pixel in the feature window
 __global__ void trackFeatureKernel(
 	KLT_TrackingContext *d_tc,
 	const float *d_pyramid1,
@@ -59,7 +65,8 @@ __global__ void trackFeatureKernel(
 	float max_residue
 );
 
-
+// Host function to track features using CUDA
+// Calls the CUDA kernels to for convolution and feature tracking
 __host__ void kltTrackFeaturesCUDA(
   KLT_TrackingContext h_tc,
   KLT_PixelType *h_img1,
