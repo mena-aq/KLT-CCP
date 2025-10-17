@@ -3,10 +3,11 @@
 ### Copy dataset
 In the root folder, run:
 ```bash
-cp -r data/dataset1/ src/V1/dataset1/
-cp -r data/dataset2/ src/V1/dataset2/
-cp -r data/dataset3/ src/V1/dataset3/
+cp -r data/dataset1/ src/Vx/dataset1/
+cp -r data/dataset2/ src/Vx/dataset2/
+cp -r data/dataset3/ src/Vx/dataset3/
 ```
+replace x with the version you wish to run e.g. V1,V2..
 
 ## Running V1
 #### Make libraries:
