@@ -18,22 +18,6 @@ extern float sigma_last;
 /* Forward declarations for static helpers used below */
 static void _computeKernels(float sigma, ConvolutionKernel *gauss, ConvolutionKernel *gaussderiv);
 
-/* Debug helper to print float image contents */
-void printFloatImage(_KLT_FloatImage img, const char *label) {
-    // if (!img || !label) return;
-    // printf("---- %s ----\n", label);
-    // printf("Dimensions: %d x %d\n", img->ncols, img->nrows);
-
-    // for (int i = 0; i < img->nrows; i++) {
-    //     for (int j = 0; j < img->ncols; j++) {
-    //         int idx = i * img->ncols + j;
-    //         printf("%.2f ", img->data[idx]);
-    //     }
-    //     printf("\n");
-    // }
-    // printf("-----------------\n");
-}
-
 /* Small helper for CUDA errors */
 static void checkCuda(cudaError_t err, const char *msg)
 {
@@ -109,15 +93,10 @@ __host__ void convolveImageHorizCUDA(
   assert(h_imgout->ncols >= h_imgin->ncols);
   assert(h_imgout->nrows >= h_imgin->nrows);
 
+  /*Variables to pass in cudaMalloc*/
   size_t npix = (size_t)ncols * (size_t)nrows;
   size_t img_bytes = npix * sizeof(float);
   size_t kernel_bytes = (size_t)kwidth * sizeof(float);
-
-  /* Debug prints (optional) */
-//   printf("[DEBUG] h_imgin->data=%p\n", (void*)h_imgin->data);
-//      printf("[DEBUG] ncols=%d nrows=%d npix=%zu img_bytes=%zu\n",
-//            ncols, nrows, npix, img_bytes); 
-// printf("[DEBUG] kernel.data=%p\n", h_kernel.data);
 
   float *d_imgin = NULL, *d_imgout = NULL, *d_kernel = NULL;
 
@@ -134,6 +113,7 @@ __host__ void convolveImageHorizCUDA(
   dim3 blockSize(16, 16);
   dim3 gridSize((ncols + blockSize.x - 1)/blockSize.x, (nrows + blockSize.y - 1)/blockSize.y);
 
+  /*Call Kernel from GPU*/
   convolveHorizKernel<<<gridSize, blockSize>>>(d_imgin, d_imgout, ncols, nrows, d_kernel, kwidth);
   checkCuda(cudaGetLastError(), "horiz Kernel launch failed");
   checkCuda(cudaDeviceSynchronize(), "Kernel execution failed");
