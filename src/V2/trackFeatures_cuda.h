@@ -43,7 +43,6 @@ __device__ float interpolateCUDA(
 // Tracks a singular feature point across two image pyramids
 // Each thread handles one pixel in the feature window
 __global__ void trackFeatureKernel(
-	KLT_TrackingContext *d_tc,
 	const float *d_pyramid1,
 	const float *d_pyramid1_gradx,
 	const float *d_pyramid1_grady,
@@ -64,6 +63,7 @@ __global__ void trackFeatureKernel(
 	float th,
 	float max_residue
 );
+
 
 // Host function to track features using CUDA
 // Calls the CUDA kernels to for convolution and feature tracking
