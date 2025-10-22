@@ -19,6 +19,8 @@ saved to a text file; each feature list is also written to a PPM file.
 #include "klt.h"
 
 #include "trackFeatures_cuda.h"
+#include <cuda_runtime.h>
+
 
 // Function to count image files in dataset folder 
 int count_image_files(const char* folder_path) {
@@ -52,7 +54,8 @@ int main(int argc, char *argv[])
 {
   unsigned char *img1, *img2;
   char fnamein[100], fnameout[100];
-  char dataset_folder[200] = "dataset3";
+  //char dataset_folder[200] = "dataset3";
+    char dataset_folder[200] = "/kaggle/input/dataset3/dataset3";
   char output_folder[200] = "output";
 
   KLT_TrackingContext tc;
@@ -95,6 +98,14 @@ int main(int argc, char *argv[])
   KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, fnameout);
 
   // for each frame in the sequence... 
+
+    // add cuda timings
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    
+    cudaEventRecord(start,0);
+
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
     pgmReadFile(fnamein, img2, &ncols, &nrows);
@@ -108,6 +119,16 @@ int main(int argc, char *argv[])
     sprintf(fnameout, "%s/feat%d.ppm", output_folder, i);
     KLTWriteFeatureListToPPM(fl, img2, ncols, nrows, fnameout);
   }
+
+    cudaEventRecord(stop,0);   // Stop timing
+    cudaEventSynchronize(stop);
+    
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    printf("GPU tracking time for %d frames: %f ms\n", nFrames-1, milliseconds);
+    
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
   
   KLTWriteFeatureTable(ft, "features.txt", "%5.1f");
   KLTWriteFeatureTable(ft, "features.ft", NULL);

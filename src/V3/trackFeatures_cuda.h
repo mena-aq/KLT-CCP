@@ -23,6 +23,28 @@ extern "C" {
 #include <cuda.h>
 
 
+// Shared pyramid metadata structure (host-side only)
+typedef struct {
+    int nLevels;
+    float subsampling;
+    int *nrows;    // array of size nLevels
+    int *ncols;    // array of size nLevels
+    size_t *offsets;   // array of size nLevels (offsets into pure image data buffer)
+    size_t total_size; // total floats needed for all image data
+} PyramidMetadata;
+
+
+// Device-side pyramid metadata (passed as parameters to kernels)
+typedef struct {
+    int nLevels;
+    float subsampling;
+    // Device arrays for pyramid dimensions and offsets  
+    const int *nrows;    // device pointer to nrows array
+    const int *ncols;    // device pointer to ncols array
+    const size_t *offsets; // device pointer to offsets array
+} DevicePyramidMeta;
+
+
 // CUDA version of sumAbsFloatWindow for GPU 
 __host__ __device__ float sumAbsFloatWindowCUDA(
 	float* fw,
@@ -31,12 +53,11 @@ __host__ __device__ float sumAbsFloatWindowCUDA(
 );
 
 
-// device implementation of _interpolate
+// device implementation of _interpolate (uses constant memory)
 __device__ float interpolateCUDA(
-	float x, 
-	float y, 
-	const float *buf, 
-	int level
+    float x, float y, 
+    const float *img_data, 
+    int level
 );
 
 // CUDA kernel for tracking features
