@@ -10,6 +10,17 @@
 
 #include "convolve_cuda.h"
 
+#define CUDA_CHECK(call)                                                    \
+do {                                                                        \
+    cudaError_t err = call;                                                 \
+    if (err != cudaSuccess) {                                               \
+        fprintf(stderr, "CUDA error at %s:%d: %s\n",                        \
+                __FILE__, __LINE__, cudaGetErrorString(err));               \
+        exit(EXIT_FAILURE);                                                 \
+    }                                                                       \
+} while (0)
+
+
 /* External globals expected from other parts of the KLT codebase */
 extern ConvolutionKernel gauss_kernel;
 extern ConvolutionKernel gaussderiv_kernel;
@@ -79,7 +90,7 @@ __global__ void convolveVertKernel(const float *imgin, float *imgout,
 }
 
 /* Host wrapper for horizontal convolution */
-__host__ void convolveImageHorizCUDA(
+__host__ void convolveImageHorizCUDAold(
   _KLT_FloatImage h_imgin,
   ConvolutionKernel h_kernel,
   _KLT_FloatImage h_imgout,
@@ -128,7 +139,7 @@ __host__ void convolveImageHorizCUDA(
 }
 
 /* Host wrapper for vertical convolution */
-__host__ void convolveImageVertCUDA(
+__host__ void convolveImageVertCUDAold(
   _KLT_FloatImage h_imgin,
   ConvolutionKernel h_kernel,
   _KLT_FloatImage h_imgout,
@@ -170,7 +181,7 @@ __host__ void convolveImageVertCUDA(
 }
 
 /* Separate (horizontal then vertical) convolution using CUDA wrappers */
-__host__ void convolveSeparateCUDA(
+__host__ void convolveSeparateCUDAold(
   _KLT_FloatImage imgin,
   ConvolutionKernel horiz_kernel,
   ConvolutionKernel vert_kernel,
@@ -183,15 +194,15 @@ __host__ void convolveSeparateCUDA(
     return;
   }
 
-  convolveImageHorizCUDA(imgin, horiz_kernel, tmpimg, imgin->ncols, imgin->nrows, horiz_kernel.width);
-  convolveImageVertCUDA(tmpimg, vert_kernel, imgout, tmpimg->ncols, tmpimg->nrows, vert_kernel.width);
+  convolveImageHorizCUDAold(imgin, horiz_kernel, tmpimg, imgin->ncols, imgin->nrows, horiz_kernel.width);
+  convolveImageVertCUDAold(tmpimg, vert_kernel, imgout, tmpimg->ncols, tmpimg->nrows, vert_kernel.width);
 
   /* Free memory */
   _KLTFreeFloatImage(tmpimg);
 }
 
-/* Compute smoothed image via separable convolution (CUDA) */
-__host__ void computeSmoothedImageCUDA(
+
+__host__ void computeSmoothedImageCUDAold(
   _KLT_FloatImage img,
   float sigma,
   _KLT_FloatImage smooth)
@@ -204,11 +215,11 @@ __host__ void computeSmoothedImageCUDA(
   if (fabsf(sigma - sigma_last) > 0.05f)
     _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
 
-  convolveSeparateCUDA(img, gauss_kernel, gauss_kernel, smooth);
+  convolveSeparateCUDAold(img, gauss_kernel, gauss_kernel, smooth);
 }
 
 /* Compute pyramid using CUDA-smoothed images */
-__host__ void computePyramidCUDA(
+__host__ void computePyramidCUDAold(
   _KLT_FloatImage img,
   _KLT_Pyramid pyramid,
   float sigma_fact)
@@ -240,7 +251,7 @@ __host__ void computePyramidCUDA(
       return;
     }
 
-    computeSmoothedImageCUDA(currimg, sigma, tmpimg);
+    computeSmoothedImageCUDAold(currimg, sigma, tmpimg);
 
     /* Subsample */
     oldncols = ncols;
@@ -259,7 +270,7 @@ __host__ void computePyramidCUDA(
 }
 
 /* Compute gradients using CUDA separable convolutions */
-__host__ void computeGradientsCUDA(
+__host__ void computeGradientsCUDAold(
   _KLT_FloatImage img,
   float sigma,
   _KLT_FloatImage gradx,
@@ -275,9 +286,275 @@ __host__ void computeGradientsCUDA(
   if (fabsf(sigma - sigma_last) > 0.05f)
     _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
 
-  convolveSeparateCUDA(img, gaussderiv_kernel, gauss_kernel, gradx);
-  convolveSeparateCUDA(img, gauss_kernel, gaussderiv_kernel, grady);
+  convolveSeparateCUDAold(img, gaussderiv_kernel, gauss_kernel, gradx);
+  convolveSeparateCUDAold(img, gauss_kernel, gaussderiv_kernel, grady);
 }
+
+
+// ------------------------------------------- v3.5 --------------------------------------
+
+__host__ void convolveImageHorizCUDA(
+  float *d_imgin,
+  ConvolutionKernel h_kernel,
+  float *d_imgout,
+  int ncols,
+  int nrows,
+  int kwidth)
+{
+/*
+  // Check input data
+  float *h_check_input = (float*)malloc(20 * sizeof(float));
+  CUDA_CHECK(cudaMemcpy(h_check_input, d_imgin,20 * sizeof(float), cudaMemcpyDeviceToHost));
+  printf("Horizontal Input data sample: ");
+  for (int i = 0; i < 20; i++) {
+    printf("%.3f ", h_check_input[i]);
+  }
+  printf("\n");
+  free(h_check_input);
+*/
+  /* Basic checks to match original behavior */
+  assert(h_kernel.width % 2 == 1);
+  assert(d_imgin != d_imgout);
+  //assert(h_imgout->ncols >= h_imgin->ncols);
+  //assert(h_imgout->nrows >= h_imgin->nrows);
+
+  /*Variables to pass in cudaMalloc*/
+  size_t npix = (size_t)ncols * (size_t)nrows;
+  size_t img_bytes = npix * sizeof(float);
+  size_t kernel_bytes = (size_t)kwidth * sizeof(float);
+
+  //float *d_imgin = NULL, *d_imgout = NULL, *d_kernel = NULL;
+
+  // allocate and copy device kernel
+  float *d_kernel = NULL;
+  CUDA_CHECK(cudaMalloc((void**)&d_kernel, kernel_bytes));
+  CUDA_CHECK(cudaMemcpy(d_kernel, h_kernel.data, kernel_bytes, cudaMemcpyHostToDevice));
+
+  /* Launch kernel */
+  dim3 blockSize(16, 16);
+  dim3 gridSize((ncols + blockSize.x - 1)/blockSize.x, (nrows + blockSize.y - 1)/blockSize.y);
+
+  /*Call Kernel from GPU*/
+  convolveHorizKernel<<<gridSize, blockSize>>>(d_imgin, d_imgout, ncols, nrows, d_kernel, kwidth);
+  checkCuda(cudaGetLastError(), "horiz Kernel launch failed");
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  // Check immediate output
+/*
+  float *h_check_horiz_output = (float*)malloc(20 * sizeof(float));
+  CUDA_CHECK(cudaMemcpy(h_check_horiz_output, d_imgout, 20 * sizeof(float), cudaMemcpyDeviceToHost));
+  printf("horizontal output immediate sample: ");
+  for (int i = 0; i < 20; i++) {
+    printf("%.3f ", h_check_horiz_output[i]);
+  }
+  printf("\n");
+  free(h_check_horiz_output);
+*/
+  /* Free device memory */
+  cudaFree(d_kernel);
+}
+
+__host__ void convolveImageVertCUDA(
+  float *d_imgin,
+  ConvolutionKernel h_kernel,
+  float *d_imgout,
+  int ncols,
+  int nrows,
+  int kwidth)
+{
+/*
+  float *h_check_vert_input = (float*)malloc(20 * sizeof(float));
+  CUDA_CHECK(cudaMemcpy(h_check_vert_input, d_imgin, 20 * sizeof(float), cudaMemcpyDeviceToHost));
+  printf("Vertical input (horizontal output) sample: ");
+  for (int i = 0; i < 20; i++) {
+    printf("%.3f ", h_check_vert_input[i]);
+  }
+  printf("\n");
+*/
+
+  /* Basic checks to match original behavior */
+  assert(h_kernel.width % 2 == 1);
+  assert(d_imgin != d_imgout);
+  //assert(h_imgout->ncols >= h_imgin->ncols);
+  //assert(h_imgout->nrows >= h_imgin->nrows);
+
+  size_t npix = (size_t)ncols * (size_t)nrows;
+  size_t img_bytes = npix * sizeof(float);
+  size_t kernel_bytes = (size_t)kwidth * sizeof(float);
+
+  //float *d_imgin = NULL, *d_imgout = NULL, *d_kernel = NULL;
+
+  // allocate and copy device kernel
+  float *d_kernel = NULL;
+  CUDA_CHECK(cudaMalloc((void**)&d_kernel, kernel_bytes));
+  CUDA_CHECK(cudaMemcpy(d_kernel, h_kernel.data, kernel_bytes, cudaMemcpyHostToDevice));
+
+  dim3 blockSize(16, 16);
+  dim3 gridSize((ncols + blockSize.x - 1)/blockSize.x, (nrows + blockSize.y - 1)/blockSize.y);
+
+  convolveVertKernel<<<gridSize, blockSize>>>(d_imgin, d_imgout, ncols, nrows, d_kernel, kwidth);
+  checkCuda(cudaGetLastError(), "vert Kernel launch failed");
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  // Check immediate output
+/*
+  float *h_check_vert_output = (float*)malloc(20 * sizeof(float));
+  CUDA_CHECK(cudaMemcpy(h_check_vert_output, d_imgout, 20 * sizeof(float), cudaMemcpyDeviceToHost));
+  printf("Vertical output immediate sample: ");
+  for (int i = 0; i < 20; i++) {
+    printf("%.3f ", h_check_vert_output[i]);
+  }
+  printf("\n");
+  free(h_check_vert_output);
+*/
+
+  // Free device memory
+  cudaFree(d_kernel);
+}
+
+__host__ void convolveSeparateCUDA(
+  float *d_imgin,
+  ConvolutionKernel horiz_kernel,
+  ConvolutionKernel vert_kernel,
+  float *d_imgout,
+  int ncols,
+  int nrows)
+{
+
+
+  /* Create temporary image */
+  float *d_tmpimg = NULL;
+  size_t img_bytes = (size_t)ncols * (size_t)nrows * sizeof(float);
+  CUDA_CHECK(cudaMalloc((void**)&d_tmpimg, img_bytes));
+  CUDA_CHECK(cudaMemset(d_tmpimg, 0, img_bytes));
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  convolveImageHorizCUDA(d_imgin, horiz_kernel, d_tmpimg, ncols, nrows, horiz_kernel.width);
+  CUDA_CHECK(cudaDeviceSynchronize());
+  convolveImageVertCUDA(d_tmpimg, vert_kernel, d_imgout, ncols, nrows, vert_kernel.width);
+  CUDA_CHECK(cudaDeviceSynchronize());
+    /* Free memory */
+  cudaFree(d_tmpimg);
+}
+
+__host__ void computeSmoothedImageCUDA(
+  float *d_img,
+  float sigma,
+  float *d_smooth_img,
+  int ncols,
+  int nrows)
+{
+  assert(d_smooth_img != NULL);
+
+  /* Compute kernel, if necessary; gauss_deriv is not used */
+  if (fabsf(sigma - sigma_last) > 0.05f)
+    _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
+
+  convolveSeparateCUDA(d_img, gauss_kernel, gauss_kernel, d_smooth_img, ncols, nrows);
+}
+
+
+__global__ void subsampleKernel(
+    const float *d_src, float *d_dst,
+    int src_ncols, int src_nrows,
+    int dst_ncols, int dst_nrows,
+    int subsampling, int subhalf)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x < dst_ncols && y < dst_nrows) {
+        int src_x = subsampling * x + subhalf;
+        int src_y = subsampling * y + subhalf;
+        d_dst[y * dst_ncols + x] = d_src[src_y * src_ncols + src_x];
+    }
+}
+
+__host__ void computePyramidCUDA(
+  float *d_img,
+  float *d_pyramid,
+  float sigma_fact,
+  int ncols,
+  int nrows,
+  int subsampling,
+  int nLevels)
+{
+  int subhalf = subsampling / 2;
+  float sigma = subsampling * sigma_fact;
+
+  if (subsampling != 2 && subsampling != 4 &&
+      subsampling != 8 && subsampling != 16 && subsampling != 32)
+    KLTError("(_KLTComputePyramid)  Pyramid's subsampling must "
+             "be either 2, 4, 8, 16, or 32");
+
+
+  // Copy input image to level 0 of pyramid (first level starts at offset 0)
+  CUDA_CHECK(cudaMemcpy(d_pyramid, d_img, ncols * nrows * sizeof(float), cudaMemcpyDeviceToDevice));
+
+  int current_ncols = ncols;
+  int current_nrows = nrows;
+  size_t current_offset = 0;
+
+  float *d_tmp = NULL, *d_smooth = NULL;
+  CUDA_CHECK(cudaMalloc(&d_tmp, current_ncols * current_nrows * sizeof(float)));
+  CUDA_CHECK(cudaMalloc(&d_smooth, current_ncols * current_nrows * sizeof(float)));
+
+  for (int i = 1; i < nLevels; ++i) {
+
+    size_t next_offset = current_offset + (current_ncols * current_nrows);
+
+    // Smooth current level
+    computeSmoothedImageCUDA(d_pyramid + current_offset, sigma, d_smooth, current_ncols, current_nrows);
+
+    // Get new dimensions
+    int next_ncols = current_ncols / subsampling;
+    int next_nrows = current_nrows / subsampling;
+
+    // Subsample smoothed image into next pyramid level
+    dim3 blockSize(16, 16);
+    dim3 gridSize((next_ncols + blockSize.x - 1) / blockSize.x,
+                  (next_nrows + blockSize.y - 1) / blockSize.y);
+    subsampleKernel<<<gridSize, blockSize>>>(
+        d_smooth, d_pyramid + next_offset,
+        current_ncols, current_nrows,
+        next_ncols, next_nrows,
+        subsampling, subhalf);
+    CUDA_CHECK(cudaGetLastError());
+
+    // Prepare for next level
+    current_offset = next_offset;
+    current_ncols = next_ncols;
+    current_nrows = next_nrows;
+  }
+
+  CUDA_CHECK(cudaFree(d_tmp));
+  CUDA_CHECK(cudaFree(d_smooth));
+
+}
+
+/* Compute gradients using CUDA separable convolutions */
+__host__ void computeGradientsCUDA(
+  float *d_img,
+  float sigma,
+  float *d_gradx,
+  float *d_grady,
+  int ncols,
+  int nrows)
+{
+  /* Output images must be large enough to hold result */
+  //assert(gradx->ncols >= img->ncols);
+  //assert(gradx->nrows >= img->nrows);
+  //assert(grady->ncols >= img->ncols);
+  //assert(grady->nrows >= img->nrows);
+
+  /* Compute kernels, if necessary */
+  if (fabsf(sigma - sigma_last) > 0.05f)
+    _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
+
+  convolveSeparateCUDA(d_img, gaussderiv_kernel, gauss_kernel, d_gradx, ncols ,nrows);
+  convolveSeparateCUDA(d_img, gauss_kernel, gaussderiv_kernel, d_grady, ncols, nrows);
+
+}
+
 
 /* CPU: convert pixel values to float image */
 void _KLTToFloatImage(
@@ -297,7 +574,6 @@ void _KLTToFloatImage(
 
   while (img < ptrend)  *ptrout++ = (float) *img++;
 }
-
 
 
 
