@@ -106,6 +106,8 @@ int main(int argc, char *argv[])
     
     cudaEventRecord(start,0);
 
+  allocateGPUResources(nFeatures, tc, ncols, nrows);
+
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
     pgmReadFile(fnamein, img2, &ncols, &nrows);
@@ -119,6 +121,8 @@ int main(int argc, char *argv[])
     sprintf(fnameout, "%s/feat%d.ppm", output_folder, i);
     KLTWriteFeatureListToPPM(fl, img2, ncols, nrows, fnameout);
   }
+  
+  freeGPUResources();
 
     cudaEventRecord(stop,0);   // Stop timing
     cudaEventSynchronize(stop);

@@ -184,6 +184,38 @@ __constant__ size_t c_offsets[32];
 static float *d_img1 = NULL,*d_img2 =NULL;
 static float *d_smooth_img1 = NULL, *d_smooth_img2 = NULL;
 
+// v3.6 trying pinned memory 
+// Add these global pinned buffers
+static float *h_in_x_pinned = NULL, *h_in_y_pinned = NULL;
+static int *h_in_val_pinned = NULL;
+static float *h_out_x_pinned = NULL, *h_out_y_pinned = NULL;  
+static int *h_out_val_pinned = NULL;
+static size_t pinned_pool_size = 0;
+
+
+static void allocatePinnedBuffers(int numFeatures) {
+    if (pinned_pool_size < numFeatures) {
+        printf("Allocating pinned memory for %d features...\n", numFeatures);
+        
+        // Free existing if too small
+        if (h_in_x_pinned) cudaFreeHost(h_in_x_pinned);
+        if (h_in_y_pinned) cudaFreeHost(h_in_y_pinned);
+        if (h_in_val_pinned) cudaFreeHost(h_in_val_pinned);
+        if (h_out_x_pinned) cudaFreeHost(h_out_x_pinned);
+        if (h_out_y_pinned) cudaFreeHost(h_out_y_pinned);
+        if (h_out_val_pinned) cudaFreeHost(h_out_val_pinned);
+        
+        // Allocate new pinned memory
+        CUDA_CHECK(cudaHostAlloc((void**)&h_in_x_pinned, sizeof(float) * numFeatures, cudaHostAllocDefault));
+        CUDA_CHECK(cudaHostAlloc((void**)&h_in_y_pinned, sizeof(float) * numFeatures, cudaHostAllocDefault));
+        CUDA_CHECK(cudaHostAlloc((void**)&h_in_val_pinned, sizeof(int) * numFeatures, cudaHostAllocDefault));
+        CUDA_CHECK(cudaHostAlloc((void**)&h_out_x_pinned, sizeof(float) * numFeatures, cudaHostAllocDefault));
+        CUDA_CHECK(cudaHostAlloc((void**)&h_out_y_pinned, sizeof(float) * numFeatures, cudaHostAllocDefault));
+        CUDA_CHECK(cudaHostAlloc((void**)&h_out_val_pinned, sizeof(int) * numFeatures, cudaHostAllocDefault));
+        
+        pinned_pool_size = numFeatures;
+    }
+}
 
 static void allocateFeatureList(int numFeatures) {
     if (feature_pool_size < numFeatures) {
@@ -261,6 +293,71 @@ static void allocatePyramidBuffers(_KLT_Pyramid pyramid) {
     }
 }
 
+__host__ void allocateGPUResources(int numFeatures, KLT_TrackingContext h_tc, int ncols, int nrows) {
+                            
+    // V3.1: allocate feature list once
+    allocateFeatureList(numFeatures);
+
+    // V3.1: allocate pyramids once
+    _KLT_Pyramid temp_pyramid_for_size = NULL;
+    if (h_tc->sequentialMode && h_tc->pyramid_last != NULL) {
+        temp_pyramid_for_size = (_KLT_Pyramid) h_tc->pyramid_last;
+    } else {
+        // Create a temporary pyramid just for size estimation
+        int subsampling = (int)h_tc->subsampling;
+        temp_pyramid_for_size = _KLTCreatePyramid(ncols, nrows, subsampling, h_tc->nPyramidLevels);
+    }
+    allocatePyramidBuffers(temp_pyramid_for_size);
+    // Free temporary pyramid if we created it
+    if (temp_pyramid_for_size != h_tc->pyramid_last) {
+        _KLTFreePyramid(temp_pyramid_for_size);
+    }
+
+    // allocate host pinned memory feature list buffers
+    allocatePinnedBuffers(numFeatures);
+
+}
+
+__host__ void freeGPUResources(){
+    // free feature list
+    if (d_in_x) cudaFree(d_in_x);
+    if (d_in_y) cudaFree(d_in_y);
+    if (d_in_val) cudaFree(d_in_val);
+    if (d_out_x) cudaFree(d_out_x);
+    if (d_out_y) cudaFree(d_out_y);
+    if (d_out_val) cudaFree(d_out_val);
+    d_in_x = d_in_y = NULL;
+    d_in_val = NULL;
+    d_out_x = d_out_y = NULL;
+    d_out_val = NULL;
+
+    //free pyramids
+    if (d_pyramid1) cudaFree(d_pyramid1);
+    if (d_pyramid1_gradx) cudaFree(d_pyramid1_gradx);
+    if (d_pyramid1_grady) cudaFree(d_pyramid1_grady);
+    if (d_pyramid2) cudaFree(d_pyramid2);
+    if (d_pyramid2_gradx) cudaFree(d_pyramid2_gradx);
+    if (d_pyramid2_grady) cudaFree(d_pyramid2_grady);
+    d_pyramid1 = d_pyramid1_gradx = d_pyramid1_grady = NULL;
+    d_pyramid2 = d_pyramid2_gradx = d_pyramid2_grady = NULL;
+    freePyramidMetadata();
+
+    //free host pinned memory
+    if (h_in_x_pinned) cudaFreeHost(h_in_x_pinned);
+    if (h_in_y_pinned) cudaFreeHost(h_in_y_pinned);
+    if (h_in_val_pinned) cudaFreeHost(h_in_val_pinned);
+    if (h_out_x_pinned) cudaFreeHost(h_out_x_pinned);
+    if (h_out_y_pinned) cudaFreeHost(h_out_y_pinned);
+    if (h_out_val_pinned) cudaFreeHost(h_out_val_pinned);
+    
+    h_in_x_pinned = h_in_y_pinned = NULL;
+    h_in_val_pinned = NULL;
+    h_out_x_pinned = h_out_y_pinned = NULL;
+    h_out_val_pinned = NULL;
+    pinned_pool_size = 0;
+}
+
+/*
 static void copyPyramidToDevice(_KLT_Pyramid src, float* d_dest) {
     if (!src || !d_dest) return;
     
@@ -283,6 +380,7 @@ static void copyPyramidToDevice(_KLT_Pyramid src, float* d_dest) {
         CUDA_CHECK(cudaMemcpy(d_level_start, h_img->data, bytes, cudaMemcpyHostToDevice));
     }
 }
+*/
 
 __host__ __device__ float sumAbsFloatWindowCUDA(
 	float* fw,
@@ -313,6 +411,7 @@ __device__ float interpolateCUDA(float x, float y, const float *img_data, int le
              (1-ax) *   ay   * ptr[nc] +
              ax   *   ay   * ptr[nc+1] );
 }
+
 
 __global__ void trackFeatureKernel(
     const float *d_pyramid1,
@@ -523,6 +622,7 @@ __global__ void trackFeatureKernel(
     }
 }
 
+
 __host__ void kltTrackFeaturesCUDA(
   KLT_TrackingContext h_tc,
   KLT_PixelType *h_img1,
@@ -532,7 +632,6 @@ __host__ void kltTrackFeaturesCUDA(
   KLT_FeatureList h_fl
 )
 {
-
     
     _KLT_FloatImage tmpimg, floatimg1, floatimg2;
 	_KLT_Pyramid pyramid1, pyramid1_gradx, pyramid1_grady,
@@ -543,6 +642,9 @@ __host__ void kltTrackFeaturesCUDA(
     
 	int numFeatures = KLTCountRemainingFeatures(h_fl);
 
+    /// ------------------------ i need to only do these in first frame ------------------------
+    // ---------------- maybe make a wrapper for this function -------------------------
+    /*                  
     // V3.1: allocate feature list once
     allocateFeatureList(numFeatures);
 
@@ -559,6 +661,7 @@ __host__ void kltTrackFeaturesCUDA(
     if (temp_pyramid_for_size != h_tc->pyramid_last) {
         _KLTFreePyramid(temp_pyramid_for_size);
     }
+    */
 
     // v3.5
     if (first_frame){
@@ -631,6 +734,7 @@ __host__ void kltTrackFeaturesCUDA(
 
         // copy tmpimg to device
         CUDA_CHECK(cudaMemcpy(d_img1, tmpimg->data, ncols * nrows * sizeof(float), cudaMemcpyHostToDevice));
+        //--------------------- maybe used pinned memory? -------------------------------
         
         // Copy back to verify
     /*
@@ -705,7 +809,6 @@ __host__ void kltTrackFeaturesCUDA(
         }
         */
 
-
 	}
 
 
@@ -715,6 +818,7 @@ __host__ void kltTrackFeaturesCUDA(
 
     // copy tmpimg to device
     CUDA_CHECK(cudaMemcpy(d_img2, tmpimg->data, ncols * nrows * sizeof(float), cudaMemcpyHostToDevice));
+    /// ------------------------- pinned mem? ----------------------------------
 
     //computeSmoothedImageCUDA(tmpimg, _KLTComputeSmoothSigma(h_tc), floatimg2);
     computeSmoothedImageCUDA(d_img2,_KLTComputeSmoothSigma(h_tc), d_smooth_img2, ncols, nrows);
@@ -815,6 +919,7 @@ __host__ void kltTrackFeaturesCUDA(
     */
 
 	// allocate temp host arrays for feature list
+/*
 	float *h_in_x = (float*)malloc(sizeof(float) * numFeatures);
 	float *h_in_y = (float*)malloc(sizeof(float) * numFeatures);
 	int *h_in_val = (int*)malloc(sizeof(int) * numFeatures);
@@ -828,6 +933,17 @@ __host__ void kltTrackFeaturesCUDA(
 		h_in_y[i] = h_fl->feature[i]->y;
 		h_in_val[i] = h_fl->feature[i]->val;
 	}
+*/
+    //v3.6
+    //allocatePinnedBuffers(numFeatures);
+
+    // Copy data to pinned memory (fast CPU copy)
+    for (i = 0; i < numFeatures; ++i) {
+        h_in_x_pinned[i] = h_fl->feature[i]->x;
+        h_in_y_pinned[i] = h_fl->feature[i]->y; 
+        h_in_val_pinned[i] = h_fl->feature[i]->val;
+    }
+
 
 	// allocate device arrays
     /*
@@ -853,9 +969,16 @@ __host__ void kltTrackFeaturesCUDA(
         printf("First frame - initializing device feature buffers\n");
         
         // Copy input features to device
+        // --------------------- pinned mem ------------------------       
+        // Copy to device (fast pinned→device)
+        CUDA_CHECK(cudaMemcpy(d_in_x, h_in_x_pinned, sizeof(float) * numFeatures, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_in_y, h_in_y_pinned, sizeof(float) * numFeatures, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_in_val, h_in_val_pinned, sizeof(int) * numFeatures, cudaMemcpyHostToDevice));
+    /*
         CUDA_CHECK(cudaMemcpy(d_in_x, h_in_x, sizeof(float) * numFeatures, cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(d_in_y, h_in_y, sizeof(float) * numFeatures, cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(d_in_val, h_in_val, sizeof(int) * numFeatures, cudaMemcpyHostToDevice));
+    */
         
     } else {
         printf("Subsequent frame - copying outputs to inputs\n");
@@ -865,6 +988,8 @@ __host__ void kltTrackFeaturesCUDA(
         CUDA_CHECK(cudaMemcpy(d_in_x, d_out_x, sizeof(float) * numFeatures, cudaMemcpyDeviceToDevice));
         CUDA_CHECK(cudaMemcpy(d_in_y, d_out_y, sizeof(float) * numFeatures, cudaMemcpyDeviceToDevice));
         CUDA_CHECK(cudaMemcpy(d_in_val, d_out_val, sizeof(int) * numFeatures, cudaMemcpyDeviceToDevice));
+
+        // ---------------- check if swapping is faster ----------------
     }
 
 	// define block and grid sizes
@@ -875,10 +1000,16 @@ __host__ void kltTrackFeaturesCUDA(
     dim3 gridSize(numFeatures);
     */
 
+/*
+    //V3.6: improve occupancy, 8 features per block. invalid argument error? :(
+    const int features_per_block = 1;
+    dim3 blockSize(window_width, window_height, features_per_block);
+    int gridSize = (numFeatures + features_per_block - 1) / features_per_block;
+*/
+   
     // V3.3: update launch configuration occupancy (windowsize=blocksize)
 	dim3 blockSize(window_width,window_height);
     dim3 gridSize(numFeatures);
-
 
 	// launch kernel with feature arrays and packed pyramids
 	// we use contiguous single buffer for pyramids to ease memory management
@@ -913,24 +1044,38 @@ __host__ void kltTrackFeaturesCUDA(
 	// synchronize
 	cudaDeviceSynchronize();
 
-    printf("Exit Kernel\n");
+    //printf("Exit Kernel\n");
 
 	// Copy back outputs
 	// we need only the output feature list arrays
+/*
 	cudaMemcpy(h_out_x, d_out_x, sizeof(float) * numFeatures, cudaMemcpyDeviceToHost);
 	cudaMemcpy(h_out_y, d_out_y, sizeof(float) * numFeatures, cudaMemcpyDeviceToHost);
 	cudaMemcpy(h_out_val, d_out_val, sizeof(int) * numFeatures, cudaMemcpyDeviceToHost);
+*/
+    // Copy results back using pinned memory
+    CUDA_CHECK(cudaMemcpy(h_out_x_pinned, d_out_x, sizeof(float) * numFeatures, cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_out_y_pinned, d_out_y, sizeof(float) * numFeatures, cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_out_val_pinned, d_out_val, sizeof(int) * numFeatures, cudaMemcpyDeviceToHost));
 
+    // Copy to feature list (fast CPU copy)
+    for (i = 0; i < numFeatures; ++i) {
+        h_fl->feature[i]->x = h_out_x_pinned[i];
+        h_fl->feature[i]->y = h_out_y_pinned[i];
+        h_fl->feature[i]->val = h_out_val_pinned[i];
+    }
+/*
 	// Merge results into host feature list
 	for (i = 0; i < numFeatures; ++i) {
 		h_fl->feature[i]->x = h_out_x[i];
 		h_fl->feature[i]->y = h_out_y[i];
 		h_fl->feature[i]->val = h_out_val[i];
 	}
+*/
 
 	// free temp host/device arrays
-	free(h_in_x); free(h_in_y); free(h_in_val);
-	free(h_out_x); free(h_out_y); free(h_out_val);
+	//free(h_in_x); free(h_in_y); free(h_in_val);
+	//free(h_out_x); free(h_out_y); free(h_out_val);
 	//cudaFree(d_in_x); cudaFree(d_in_y); cudaFree(d_in_val);
 	//cudaFree(d_out_x); cudaFree(d_out_y); cudaFree(d_out_val);
 
@@ -946,6 +1091,9 @@ __host__ void kltTrackFeaturesCUDA(
 	#undef FREE_DEVICE_PYRAMID
     */
 
+    // -------------------- i need to free my device pyramids after all features are tracked ---------------------
+    // --------------- and my pinned feature list host -----------------------------------
+        
   	// to reuse pyramid of current image as previous image in next call
 	if (h_tc->sequentialMode)  {
 		h_tc->pyramid_last = pyramid2;
