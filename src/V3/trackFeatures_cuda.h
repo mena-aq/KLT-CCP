@@ -102,6 +102,7 @@ __host__ void kltTrackFeaturesCUDA(
 __host__ void allocateGPUResources(int numFeatures, KLT_TrackingContext h_tc, int ncols, int nrows);
 __host__ void freeGPUResources();
 
+
 #ifdef __cplusplus
 }
 #endif

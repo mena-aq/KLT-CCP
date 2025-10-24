@@ -46,6 +46,9 @@ int count_image_files(const char* folder_path) {
   return count;
 }
 
+static cudaEvent_t start_event = NULL;
+static cudaEvent_t stop_event = NULL;
+
 #ifdef WIN32
 int RunExample3()
 #else
@@ -54,8 +57,8 @@ int main(int argc, char *argv[])
 {
   unsigned char *img1, *img2;
   char fnamein[100], fnameout[100];
-  //char dataset_folder[200] = "dataset3";
-    char dataset_folder[200] = "/kaggle/input/dataset3/dataset3";
+  char dataset_folder[200] = "dataset3";
+  //char dataset_folder[200] = "/kaggle/input/dataset3/dataset3";
   char output_folder[200] = "output";
 
   KLT_TrackingContext tc;
@@ -100,14 +103,20 @@ int main(int argc, char *argv[])
   // for each frame in the sequence... 
 
     // add cuda timings
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    
-    cudaEventRecord(start,0);
+  /*
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventRecord(start,0);
+  */
+  if (!start_event) {
+    cudaEventCreate(&start_event);
+    cudaEventCreate(&stop_event);
+  }
 
   allocateGPUResources(nFeatures, tc, ncols, nrows);
 
+  cudaEventRecord(start_event, 0);
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
     pgmReadFile(fnamein, img2, &ncols, &nrows);
@@ -121,19 +130,25 @@ int main(int argc, char *argv[])
     sprintf(fnameout, "%s/feat%d.ppm", output_folder, i);
     KLTWriteFeatureListToPPM(fl, img2, ncols, nrows, fnameout);
   }
-  
-  freeGPUResources();
 
+  cudaEventRecord(stop_event, 0);
+  cudaEventSynchronize(stop_event);
+  
+  float total_ms = 0;
+  cudaEventElapsedTime(&total_ms, start_event, stop_event);
+  printf("GPU tracking time for %d frames: %f ms\n", nFrames-1, total_ms);
+  printf("Average per frame: %f ms\n", total_ms / (nFrames-1));
+
+  freeGPUResources();
+  /*
     cudaEventRecord(stop,0);   // Stop timing
     cudaEventSynchronize(stop);
-    
     float milliseconds = 0;
     cudaEventElapsedTime(&milliseconds, start, stop);
     printf("GPU tracking time for %d frames: %f ms\n", nFrames-1, milliseconds);
-    
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
-  
+  */
   KLTWriteFeatureTable(ft, "features.txt", "%5.1f");
   KLTWriteFeatureTable(ft, "features.ft", NULL);
 
