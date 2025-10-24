@@ -1,7 +1,6 @@
 #ifndef _CONVOLVE_CUDA_H_
 #define _CONVOLVE_CUDA_H_
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif
