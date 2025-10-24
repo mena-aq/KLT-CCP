@@ -610,6 +610,18 @@ __global__ void trackFeatureKernel(
 			// thread 0 checks average residue
             if (tid == 0) {
                 float residue = s_residue_sum / (window_width * window_height);
+
+                /*
+                // DEBUG: Always print residue for features that get lost
+                if (residue > max_residue) {
+                    printf("Feature %d LARGE_RESIDUE: pos=(%.1f,%.1f), residue=%.6f > threshold=%.6f\n", 
+                           featureIdx, s_x2, s_y2, residue, max_residue);
+                } else if (featureIdx < 5) { // Print a few successful ones for comparison
+                    printf("Feature %d TRACKED: pos=(%.1f,%.1f), residue=%.6f\n", 
+                           featureIdx, s_x2, s_y2, residue);
+                }
+                */
+                                                                           
                 if (residue > max_residue) s_status = KLT_LARGE_RESIDUE;
             }
             __syncthreads();
@@ -630,10 +642,7 @@ __global__ void trackFeatureKernel(
             final_y - hh < bordery || final_y + hh >= nr - bordery) {
             final_val = KLT_OOB;
         }
-        if (out_of_bounds) {
-            final_val = KLT_OOB;
-        }
-
+        
 
         if (final_val != KLT_TRACKED) {
             d_out_x[featureIdx] = -1.0f;
@@ -645,6 +654,7 @@ __global__ void trackFeatureKernel(
             d_out_val[featureIdx] = KLT_TRACKED;
         }
 
+        /*
         // Add this debugging section at the end of your kernel
         if (tid == 0 && final_val != KLT_TRACKED) {
             // Debug output for lost features
@@ -652,6 +662,7 @@ __global__ void trackFeatureKernel(
                    featureIdx, final_val, final_x, final_y, 
                    borderx, bordery, nc - borderx, nr - bordery);
         }
+        */
 
     }
 }
