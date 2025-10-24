@@ -98,6 +98,11 @@ __host__ void kltTrackFeaturesCUDA(
 );
 
 
+// Host function to allocate GPU resources needed for tracking
+__host__ void allocateGPUResources(int numFeatures, KLT_TrackingContext h_tc, int ncols, int nrows);
+__host__ void freeGPUResources();
+
+
 #ifdef __cplusplus
 }
 #endif
