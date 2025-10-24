@@ -192,68 +192,6 @@ static float *h_out_x_pinned = NULL, *h_out_y_pinned = NULL;
 static int *h_out_val_pinned = NULL;
 static size_t pinned_pool_size = 0;
 
-// streams
-static cudaStream_t data_stream = NULL;
-static cudaStream_t compute_stream = NULL;
-
-__device__ void loadPyramidWindowToShared(
-    float* shared_window,
-    const float* d_pyramid,
-    int level,
-    float center_x,
-    float center_y,
-    int window_width,
-    int window_height,
-    int hw,
-    int hh,
-    int tid)
-{
-    int nc = c_ncols[level];
-    int nr = c_nrows[level];
-    size_t offset = c_offsets[level];
-    const float* level_data = d_pyramid + offset;
-    
-    const int shared_width = window_width + 1;
-    const int shared_height = window_height + 1;
-    
-    // Each thread loads one pixel (with halo)
-    for (int pos = tid; pos < shared_width * shared_height; pos += blockDim.x * blockDim.y) {
-        int j = pos / shared_width - hh;  // -hh to hh+1
-        int i = pos % shared_width - hw;  // -hw to hw+1
-        
-        float x = center_x + i;
-        float y = center_y + j;
-        
-        // Use your existing interpolateCUDA function or direct fetch
-        if (x >= 0 && x < nc - 1 && y >= 0 && y < nr - 1) {
-            shared_window[pos] = interpolateCUDA(x, y, d_pyramid, level);
-        } else {
-            shared_window[pos] = 0.0f;  // Or appropriate border handling
-        }
-    }
-}
-
-__device__ float interpolateFromShared(
-    const float* shared_window,
-    float i, float j,
-    int shared_width)
-{
-    // Convert to local shared memory coordinates
-    float local_x = i + (shared_width - 1) / 2.0f;
-    float local_y = j + (shared_width - 1) / 2.0f;
-    
-    int xt = (int)local_x;
-    int yt = (int)local_y;
-    float ax = local_x - xt;
-    float ay = local_y - yt;
-    
-    const float* ptr = shared_window + yt * shared_width + xt;
-    return ((1-ax) * (1-ay) * ptr[0] +
-            ax   * (1-ay) * ptr[1] +
-            (1-ax) *   ay   * ptr[shared_width] +
-            ax   *   ay   * ptr[shared_width+1]);
-}
-
 
 static void allocatePinnedBuffers(int numFeatures) {
     if (pinned_pool_size < numFeatures) {
@@ -378,12 +316,6 @@ __host__ void allocateGPUResources(int numFeatures, KLT_TrackingContext h_tc, in
     // allocate host pinned memory feature list buffers
     allocatePinnedBuffers(numFeatures);
 
-    // v3.6
-    if (!data_stream){
-        CUDA_CHECK(cudaStreamCreate(&data_stream));
-        CUDA_CHECK(cudaStreamCreate(&compute_stream));
-    }
-
 }
 
 __host__ void freeGPUResources(){
@@ -480,6 +412,7 @@ __device__ float interpolateCUDA(float x, float y, const float *img_data, int le
              ax   *   ay   * ptr[nc+1] );
 }
 
+
 __global__ void trackFeatureKernel(
     const float *d_pyramid1,
     const float *d_pyramid1_gradx,
@@ -504,8 +437,7 @@ __global__ void trackFeatureKernel(
     float max_residue
 )
 {
-    // v3.6
-    extern __shared__ float shared_memory[];  // Dynamic shared memory
+    const float one_plus_eps = 1.001f;
 
     int featureIdx = blockIdx.x;
     int tid = threadIdx.y * blockDim.x + threadIdx.x;
@@ -523,36 +455,7 @@ __global__ void trackFeatureKernel(
 
     int hw = window_width / 2;
     int hh = window_height / 2;
-	//int window_elems = window_width * window_height;
-    // v3.6
-    const int shared_width = window_width + 1;
-    const int shared_height = window_height + 1;
-    const int window_elems = shared_width * shared_height;
-    
-    /*
-    // v3.6
-    // Add halo for interpolation (need +1 in each dimension for bilinear)
-    const int shared_width = window_width + 1;
-    const int shared_height = window_height + 1;
-    const int shared_elems = shared_width * shared_height;
-    */
-    
-     // Shared memory for all pyramid levels needed by this feature
-    /*
-    __shared__ float s_window1[SHARED_MAX_SIZE];      // Image1 window
-    __shared__ float s_window1_gradx[SHARED_MAX_SIZE]; // GradX1 window  
-    __shared__ float s_window1_grady[SHARED_MAX_SIZE]; // GradY1 window
-    __shared__ float s_window2[SHARED_MAX_SIZE];      // Image2 window
-    __shared__ float s_window2_gradx[SHARED_MAX_SIZE]; // GradX2 window
-    __shared__ float s_window2_grady[SHARED_MAX_SIZE]; // GradY2 window
-    */
-    // Partition shared memory for the 6 pyramids
-    float* s_window1 = shared_memory;
-    float* s_window1_gradx = s_window1 + window_elems;
-    float* s_window1_grady = s_window1_gradx + window_elems;
-    float* s_window2 = s_window1_grady + window_elems;
-    float* s_window2_gradx = s_window2 + window_elems;
-    float* s_window2_grady = s_window2_gradx + window_elems;
+	int window_elems = window_width * window_height;
 
     // Bounds check: skip threads outside the window
     if (tid >= window_elems) return;
@@ -593,26 +496,31 @@ __global__ void trackFeatureKernel(
         }
         __syncthreads();
 
-        // Load windows into shared memory for current pyramid level
-        loadPyramidWindowToShared(s_window1, d_pyramid1, r, s_x1, s_y1, 
-                                 window_width, window_height, hw, hh, tid);
-        loadPyramidWindowToShared(s_window1_gradx, d_pyramid1_gradx, r, s_x1, s_y1,
-                                 window_width, window_height, hw, hh, tid);
-        loadPyramidWindowToShared(s_window1_grady, d_pyramid1_grady, r, s_x1, s_y1,
-                                 window_width, window_height, hw, hh, tid);
-        loadPyramidWindowToShared(s_window2, d_pyramid2, r, s_x2, s_y2,
-                                 window_width, window_height, hw, hh, tid);
-        loadPyramidWindowToShared(s_window2_gradx, d_pyramid2_gradx, r, s_x2, s_y2,
-                                 window_width, window_height, hw, hh, tid);
-        loadPyramidWindowToShared(s_window2_grady, d_pyramid2_grady, r, s_x2, s_y2,
-                                 window_width, window_height, hw, hh, tid);
-        __syncthreads();
-
         // Iterative refinement for this pyramid level
         s_iteration = 0;
         s_continue = 1;
         
         do {
+
+            // Add boundary check at start of each iteration (like CPU)
+            if (tid == 0) {
+                int nc = c_ncols[r];
+                int nr = c_nrows[r];
+                
+                // Exact CPU boundary check logic
+                if (s_x1 - hw < 0.0f || nc - (s_x1 + hw) < one_plus_eps ||
+                    s_x2 - hw < 0.0f || nc - (s_x2 + hw) < one_plus_eps ||
+                    s_y1 - hh < 0.0f || nr - (s_y1 + hh) < one_plus_eps ||
+                    s_y2 - hh < 0.0f || nr - (s_y2 + hh) < one_plus_eps) {
+                    s_status = KLT_OOB;
+                    s_continue = 0;
+                }
+            }
+            __syncthreads();
+            
+            if (s_status != KLT_TRACKED) break;
+
+
             // Each thread computes its portion of the window
             int i = threadIdx.x - hw;
             int j = threadIdx.y - hh;
@@ -623,7 +531,6 @@ __global__ void trackFeatureKernel(
             float samp_y2 = s_y2 + (float)j;
 
             // Compute this thread's contribution
-            /*
             float imgdiff = interpolateCUDA(samp_x1, samp_y1, d_pyramid1, r) - 
                            interpolateCUDA(samp_x2, samp_y2, d_pyramid2, r);
             
@@ -632,16 +539,6 @@ __global__ void trackFeatureKernel(
          
             float gy = interpolateCUDA(samp_x1, samp_y1, d_pyramid1_grady, r) + 
                       interpolateCUDA(samp_x2, samp_y2, d_pyramid2_grady, r);
-            */
-            // v3.6  Use shared memory interpolation (much faster)
-            float imgdiff = interpolateFromShared(s_window1, i, j, shared_width) - 
-                           interpolateFromShared(s_window2, i, j, shared_width);
-            
-            float gx = interpolateFromShared(s_window1_gradx, i, j, shared_width) + 
-                      interpolateFromShared(s_window2_gradx, i, j, shared_width);
-                      
-            float gy = interpolateFromShared(s_window1_grady, i, j, shared_width) + 
-                      interpolateFromShared(s_window2_grady, i, j, shared_width);
 
 
             // Each thread computes its partial sums
@@ -728,9 +625,12 @@ __global__ void trackFeatureKernel(
         // bounds check
         int nc = c_ncols[0];
         int nr = c_nrows[0];
-        
+
         if (final_x - hw < borderx || final_x + hw >= nc - borderx ||
             final_y - hh < bordery || final_y + hh >= nr - bordery) {
+            final_val = KLT_OOB;
+        }
+        if (out_of_bounds) {
             final_val = KLT_OOB;
         }
 
@@ -744,6 +644,15 @@ __global__ void trackFeatureKernel(
             d_out_y[featureIdx] = final_y;
             d_out_val[featureIdx] = KLT_TRACKED;
         }
+
+        // Add this debugging section at the end of your kernel
+        if (tid == 0 && final_val != KLT_TRACKED) {
+            // Debug output for lost features
+            printf("Feature %d lost: status=%d, final_pos=(%.1f,%.1f), bounds=[%d,%d]-[%d,%d]\n",
+                   featureIdx, final_val, final_x, final_y, 
+                   borderx, bordery, nc - borderx, nr - bordery);
+        }
+
     }
 }
 
@@ -1096,46 +1005,25 @@ __host__ void kltTrackFeaturesCUDA(
         // Copy input features to device
         // --------------------- pinned mem ------------------------       
         // Copy to device (fast pinned→device)
-    /*
         CUDA_CHECK(cudaMemcpy(d_in_x, h_in_x_pinned, sizeof(float) * numFeatures, cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(d_in_y, h_in_y_pinned, sizeof(float) * numFeatures, cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(d_in_val, h_in_val_pinned, sizeof(int) * numFeatures, cudaMemcpyHostToDevice));
-    */
-        //v3.6 try memcpy async w pinned mem
-        CUDA_CHECK(cudaMemcpyAsync(d_in_x, h_in_x_pinned, sizeof(float) * numFeatures, 
-                                  cudaMemcpyHostToDevice, data_stream));
-        CUDA_CHECK(cudaMemcpyAsync(d_in_y, h_in_y_pinned, sizeof(float) * numFeatures, 
-                                  cudaMemcpyHostToDevice, data_stream));
-        CUDA_CHECK(cudaMemcpyAsync(d_in_val, h_in_val_pinned, sizeof(int) * numFeatures, 
-                                  cudaMemcpyHostToDevice, data_stream));
-    } else {
-        printf("Subsequent frame - copying outputs to inputs asynchronously\n");
-
     /*
         CUDA_CHECK(cudaMemcpy(d_in_x, h_in_x, sizeof(float) * numFeatures, cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(d_in_y, h_in_y, sizeof(float) * numFeatures, cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(d_in_val, h_in_val, sizeof(int) * numFeatures, cudaMemcpyHostToDevice));
     */
         
+    } else {
+        printf("Subsequent frame - copying outputs to inputs\n");
+        
         // Instead of swapping pointers, copy the data from outputs to inputs
         // This is safer and more explicit
-        /*
         CUDA_CHECK(cudaMemcpy(d_in_x, d_out_x, sizeof(float) * numFeatures, cudaMemcpyDeviceToDevice));
         CUDA_CHECK(cudaMemcpy(d_in_y, d_out_y, sizeof(float) * numFeatures, cudaMemcpyDeviceToDevice));
         CUDA_CHECK(cudaMemcpy(d_in_val, d_out_val, sizeof(int) * numFeatures, cudaMemcpyDeviceToDevice));
-        */
-        /*
-        CUDA_CHECK(cudaMemcpyAsync(d_in_x, d_out_x, sizeof(float) * numFeatures, 
-                                  cudaMemcpyDeviceToDevice, data_stream));
-        CUDA_CHECK(cudaMemcpyAsync(d_in_y, d_out_y, sizeof(float) * numFeatures, 
-                                  cudaMemcpyDeviceToDevice, data_stream));
-        CUDA_CHECK(cudaMemcpyAsync(d_in_val, d_out_val, sizeof(int) * numFeatures, 
-                                  cudaMemcpyDeviceToDevice, data_stream));
-        */
+
         // ---------------- check if swapping is faster ----------------
-        std::swap(d_in_x, d_out_x);
-        std::swap(d_in_y, d_out_y);
-        std::swap(d_in_val, d_out_val);
     }
 
 	// define block and grid sizes
@@ -1156,15 +1044,11 @@ __host__ void kltTrackFeaturesCUDA(
     // V3.3: update launch configuration occupancy (windowsize=blocksize)
 	dim3 blockSize(window_width,window_height);
     dim3 gridSize(numFeatures);
-    int shared_mem_size = (h_tc->window_width + 1) * (h_tc->window_height + 1) * sizeof(float) * 6; // 6 pyramids
-	
-    // v3.6
-    CUDA_CHECK(cudaStreamSynchronize(data_stream));
 
-    // launch kernel with feature arrays and packed pyramids
+	// launch kernel with feature arrays and packed pyramids
 	// we use contiguous single buffer for pyramids to ease memory management
 	// each block tracks one feature
-	trackFeatureKernel<<<gridSize, blockSize,shared_mem_size,compute_stream>>>(
+	trackFeatureKernel<<<gridSize, blockSize>>>(
 		d_pyramid1,
 		d_pyramid1_gradx,
 		d_pyramid1_grady,
@@ -1204,19 +1088,9 @@ __host__ void kltTrackFeaturesCUDA(
 	cudaMemcpy(h_out_val, d_out_val, sizeof(int) * numFeatures, cudaMemcpyDeviceToHost);
 */
     // Copy results back using pinned memory
-    /*
     CUDA_CHECK(cudaMemcpy(h_out_x_pinned, d_out_x, sizeof(float) * numFeatures, cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_out_y_pinned, d_out_y, sizeof(float) * numFeatures, cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_out_val_pinned, d_out_val, sizeof(int) * numFeatures, cudaMemcpyDeviceToHost));
-    */
-    CUDA_CHECK(cudaMemcpyAsync(h_out_x_pinned, d_out_x, sizeof(float) * numFeatures, 
-                              cudaMemcpyDeviceToHost, compute_stream));
-    CUDA_CHECK(cudaMemcpyAsync(h_out_y_pinned, d_out_y, sizeof(float) * numFeatures, 
-                              cudaMemcpyDeviceToHost, compute_stream));
-    CUDA_CHECK(cudaMemcpyAsync(h_out_val_pinned, d_out_val, sizeof(int) * numFeatures, 
-                              cudaMemcpyDeviceToHost, compute_stream));
-
-    CUDA_CHECK(cudaStreamSynchronize(compute_stream));
 
     // Copy to feature list (fast CPU copy)
     for (i = 0; i < numFeatures; ++i) {

@@ -10,6 +10,7 @@ saved to a text file; each feature list is also written to a PPM file.
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <time.h>
 #include "pnmio.h"
 #include "klt.h"
 
@@ -52,7 +53,7 @@ int main(int argc, char *argv[])
   KLT_TrackingContext tc;
   KLT_FeatureList fl;
   KLT_FeatureTable ft;
-  int nFeatures = 550, nFrames;
+  int nFeatures = 150, nFrames;
   int ncols, nrows;
   int i;
 
@@ -88,6 +89,9 @@ int main(int argc, char *argv[])
   sprintf(fnameout, "%s/feat0.ppm", output_folder);
   KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, fnameout);
 
+  // Start timing the tracking loop
+  clock_t start_time = clock();
+  
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
     pgmReadFile(fnamein, img2, &ncols, &nrows);
@@ -99,6 +103,12 @@ int main(int argc, char *argv[])
     sprintf(fnameout, "%s/feat%d.ppm", output_folder, i);
     KLTWriteFeatureListToPPM(fl, img2, ncols, nrows, fnameout);
   }
+  
+  // End timing and calculate elapsed time
+  clock_t end_time = clock();
+  double elapsed_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+  printf("Tracking time: %.3f seconds\n", elapsed_time);
+  
   KLTWriteFeatureTable(ft, "features.txt", "%5.1f");
   KLTWriteFeatureTable(ft, "features.ft", NULL);
 
