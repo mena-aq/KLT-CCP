@@ -39,7 +39,7 @@ static void checkCuda(cudaError_t err, const char *msg)
 }
 
 /* Horizontal 1D convolution kernel (reads from imgin, writes to imgout) */
-__global__ void convolveHorizKernelold(const float *imgin, float *imgout,
+__global__ void convolveHorizKernel(const float *imgin, float *imgout,
                                     int ncols, int nrows,
                                     const float *kernel, int kwidth)
 {
@@ -65,7 +65,7 @@ __global__ void convolveHorizKernelold(const float *imgin, float *imgout,
 }
 
 /* Vertical 1D convolution kernel (reads from imgin, writes to imgout) */
-__global__ void convolveVertKernelold(const float *imgin, float *imgout,
+__global__ void convolveVertKernel(const float *imgin, float *imgout,
                                     int ncols, int nrows,
                                     const float *kernel, int kwidth)
 {
@@ -92,7 +92,7 @@ __global__ void convolveVertKernelold(const float *imgin, float *imgout,
 // ------------------------------------------- v3.5 --------------------------------------
 
 
-__host__ void convolveImageHorizCUDAold(
+__host__ void convolveImageHorizCUDA(
   float *d_imgin,
   ConvolutionKernel h_kernel,
   float *d_imgout,
@@ -153,7 +153,7 @@ __host__ void convolveImageHorizCUDAold(
   cudaFree(d_kernel);
 }
 
-__host__ void convolveImageVertCUDAold(
+__host__ void convolveImageVertCUDA(
   float *d_imgin,
   ConvolutionKernel h_kernel,
   float *d_imgout,
@@ -211,7 +211,7 @@ __host__ void convolveImageVertCUDAold(
   cudaFree(d_kernel);
 }
 
-__host__ void convolveSeparateCUDAold(
+__host__ void convolveSeparateCUDA(
   float *d_imgin,
   ConvolutionKernel horiz_kernel,
   ConvolutionKernel vert_kernel,
@@ -234,7 +234,7 @@ __host__ void convolveSeparateCUDAold(
   cudaFree(d_tmpimg);
 }
 
-__host__ void computeSmoothedImageCUDAold(
+__host__ void computeSmoothedImageCUDA(
   float *d_img,
   float sigma,
   float *d_smooth_img,
@@ -266,7 +266,7 @@ __global__ void subsampleKernel(
     }
 }
 
-__host__ void computePyramidCUDAold(
+__host__ void computePyramidCUDA(
   float *d_img,
   float *d_pyramid,
   float sigma_fact,
@@ -329,7 +329,7 @@ __host__ void computePyramidCUDAold(
 }
 
 /* Compute gradients using CUDA separable convolutions */
-__host__ void computeGradientsCUDAold(
+__host__ void computeGradientsCUDA(
   float *d_img,
   float sigma,
   float *d_gradx,
@@ -638,7 +638,7 @@ void _KLTComputeSmoothedImage(
 
 // ------------------------------------------- v3.6 --------------------------------------
 
-__global__ void convolveHorizKernel(
+__global__ void convolveHorizKernel_shared(
     const float *imgin, float *imgout,
     int ncols, int nrows,
     const float *kernel, int kwidth)
@@ -688,7 +688,7 @@ __global__ void convolveHorizKernel(
     imgout[y * ncols + x] = sum;
 }
 
-__global__ void convolveVertKernel(
+__global__ void convolveVertKernel_shared(
     const float *imgin, float *imgout,
     int ncols, int nrows,
     const float *kernel, int kwidth)
@@ -738,7 +738,7 @@ __global__ void convolveVertKernel(
     imgout[y * ncols + x] = sum;
 }
 
-__host__ void convolveImageHorizCUDA(
+__host__ void convolveImageHorizCUDA_shared(
   float *d_imgin,
   ConvolutionKernel h_kernel,
   float *d_imgout,
@@ -766,7 +766,7 @@ __host__ void convolveImageHorizCUDA(
   size_t shared_mem_size = (blockSize.y * shared_width) * sizeof(float);
 
   // Launch kernel with shared memory
-  convolveHorizKernel<<<gridSize, blockSize, shared_mem_size>>>(
+  convolveHorizKernel_shared<<<gridSize, blockSize, shared_mem_size>>>(
       d_imgin, d_imgout, ncols, nrows, d_kernel, kwidth);
   
   CUDA_CHECK(cudaGetLastError());
@@ -776,7 +776,7 @@ __host__ void convolveImageHorizCUDA(
   cudaFree(d_kernel);
 }
 
-__host__ void convolveImageVertCUDA(
+__host__ void convolveImageVertCUDA_shared(
   float *d_imgin,
   ConvolutionKernel h_kernel,
   float *d_imgout,
@@ -804,7 +804,7 @@ __host__ void convolveImageVertCUDA(
   size_t shared_mem_size = (blockSize.x * shared_height) * sizeof(float);
 
   // Launch kernel with shared memory
-  convolveVertKernel<<<gridSize, blockSize, shared_mem_size>>>(
+  convolveVertKernel_shared<<<gridSize, blockSize, shared_mem_size>>>(
       d_imgin, d_imgout, ncols, nrows, d_kernel, kwidth);
   
   CUDA_CHECK(cudaGetLastError());
@@ -814,7 +814,7 @@ __host__ void convolveImageVertCUDA(
   cudaFree(d_kernel);
 }
 
-__host__ void convolveSeparateCUDA(
+__host__ void convolveSeparateCUDA_shared(
   float *d_imgin,
   ConvolutionKernel horiz_kernel,
   ConvolutionKernel vert_kernel,
@@ -829,14 +829,14 @@ __host__ void convolveSeparateCUDA(
   CUDA_CHECK(cudaMemset(d_tmpimg, 0, img_bytes));
 
   // Use shared memory versions
-  convolveImageHorizCUDA(d_imgin, horiz_kernel, d_tmpimg, ncols, nrows, horiz_kernel.width);
-  convolveImageVertCUDA(d_tmpimg, vert_kernel, d_imgout, ncols, nrows, vert_kernel.width);
+  convolveImageHorizCUDA_shared(d_imgin, horiz_kernel, d_tmpimg, ncols, nrows, horiz_kernel.width);
+  convolveImageVertCUDA_shared(d_tmpimg, vert_kernel, d_imgout, ncols, nrows, vert_kernel.width);
 
   // Free memory
   cudaFree(d_tmpimg);
 }
 
-__host__ void computeSmoothedImageCUDA(
+__host__ void computeSmoothedImageCUDA_shared(
   float *d_img,
   float sigma,
   float *d_smooth_img,
@@ -849,10 +849,10 @@ __host__ void computeSmoothedImageCUDA(
   if (fabsf(sigma - sigma_last) > 0.05f)
     _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
 
-  convolveSeparateCUDA(d_img, gauss_kernel, gauss_kernel, d_smooth_img, ncols, nrows);
+  convolveSeparateCUDA_shared(d_img, gauss_kernel, gauss_kernel, d_smooth_img, ncols, nrows);
 }
 
-__host__ void computeGradientsCUDA(
+__host__ void computeGradientsCUDA_shared(
   float *d_img,
   float sigma,
   float *d_gradx,
@@ -864,11 +864,11 @@ __host__ void computeGradientsCUDA(
   if (fabsf(sigma - sigma_last) > 0.05f)
     _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
 
-  convolveSeparateCUDA(d_img, gaussderiv_kernel, gauss_kernel, d_gradx, ncols, nrows);
-  convolveSeparateCUDA(d_img, gauss_kernel, gaussderiv_kernel, d_grady, ncols, nrows);
+  convolveSeparateCUDA_shared(d_img, gaussderiv_kernel, gauss_kernel, d_gradx, ncols, nrows);
+  convolveSeparateCUDA_shared(d_img, gauss_kernel, gaussderiv_kernel, d_grady, ncols, nrows);
 }
 
-__host__ void computePyramidCUDA(
+__host__ void computePyramidCUDA_shared(
   float *d_img,
   float *d_pyramid,
   float sigma_fact,
@@ -899,7 +899,7 @@ __host__ void computePyramidCUDA(
     size_t next_offset = current_offset + (current_ncols * current_nrows);
 
     // Smooth current level using shared memory optimization
-    computeSmoothedImageCUDA(d_pyramid + current_offset, sigma, d_smooth, current_ncols, current_nrows);
+    computeSmoothedImageCUDA_shared(d_pyramid + current_offset, sigma, d_smooth, current_ncols, current_nrows);
 
     // Get new dimensions
     int next_ncols = current_ncols / subsampling;
