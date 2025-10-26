@@ -15,11 +15,6 @@ do {                                                                        \
     }                                                                       \
 } while (0)
 
-// helper function to round up to nearest multiple of 32 for thread warps
-static inline int roundUp32(int x) {
-    return ((x + 31) / 32) * 32;
-}
-
 
 ////////////// THIS IS JUST FOR DEBUGGING /////////////////////////////
 // Add this function to verify pyramid contents
@@ -344,6 +339,8 @@ __host__ void allocateGPUResources(int numFeatures, KLT_TrackingContext h_tc, in
     cudaEventCreate(&pyramid3_ready);
     cudaEventCreate(&tracking_done);
 
+    //computeKernelsConstant(_KLTComputeSmoothSigma(h_tc));
+    initializePrecomputedKernels();
 }
 
 __host__ void freeGPUResources(){

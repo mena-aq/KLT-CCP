@@ -45,6 +45,21 @@ typedef struct {
 } DevicePyramidMeta;
 
 
+static void initializePyramidMetadata(_KLT_Pyramid pyramid);
+
+static void freePyramidMetadata();
+
+static float* getDevicePyramidLevel(float *d_pyramid, int level);
+
+static size_t estimatePyramidSize(_KLT_Pyramid pyramid);
+
+static void allocatePyramidBuffers(_KLT_Pyramid pyramid);
+
+__host__ void allocateGPUResources(int numFeatures, KLT_TrackingContext h_tc, int ncols, int nrows);
+
+
+
+
 // CUDA version of sumAbsFloatWindow for GPU 
 __host__ __device__ float sumAbsFloatWindowCUDA(
 	float* fw,
@@ -64,25 +79,27 @@ __device__ float interpolateCUDA(
 // Tracks a singular feature point across two image pyramids
 // Each thread handles one pixel in the feature window
 __global__ void trackFeatureKernel(
-	const float *d_pyramid1,
-	const float *d_pyramid1_gradx,
-	const float *d_pyramid1_grady,
-	const float *d_pyramid2,
-	const float *d_pyramid2_gradx,
-	const float *d_pyramid2_grady,
-	const float *d_in_x,
-	const float *d_in_y,
-	const int *d_in_val,
-	float *d_out_x,
-	float *d_out_y,
-	int *d_out_val,
-	int window_width,
-	int window_height,
-	float step_factor,
-	int max_iterations,
-	float small,
-	float th,
-	float max_residue
+    const float *d_pyramid1,
+    const float *d_pyramid1_gradx,
+    const float *d_pyramid1_grady,
+    const float *d_pyramid2,
+    const float *d_pyramid2_gradx,
+    const float *d_pyramid2_grady,
+    const float *d_in_x,
+    const float *d_in_y,
+    const int *d_in_val,
+    float *d_out_x,
+    float *d_out_y,
+    int *d_out_val,
+    int borderx,
+    int bordery,
+    int window_width,
+    int window_height,
+    float step_factor,
+    int max_iterations,
+    float small,
+    float th,
+    float max_residue
 );
 
 
@@ -97,11 +114,6 @@ __host__ void kltTrackFeaturesCUDA(
   int nrows,
   KLT_FeatureList h_fl
 );
-
-
-// Host function to allocate GPU resources needed for tracking
-__host__ void allocateGPUResources(int numFeatures, KLT_TrackingContext h_tc, int ncols, int nrows);
-__host__ void freeGPUResources();
 
 
 #ifdef __cplusplus

@@ -22,25 +22,48 @@ extern "C" {
 
 static void checkCuda(cudaError_t err, const char *msg);
 
+#define MAX_KERNEL_WIDTH 	71
+
+__constant__ float c_gauss_kernel_07[MAX_KERNEL_WIDTH];
+__constant__ float c_gaussderiv_kernel_07[MAX_KERNEL_WIDTH];
+__constant__ float c_gauss_kernel_36[MAX_KERNEL_WIDTH]; 
+__constant__ float c_gaussderiv_kernel_36[MAX_KERNEL_WIDTH];
+__constant__ float c_gauss_kernel_10[MAX_KERNEL_WIDTH];
+__constant__ float c_gaussderiv_kernel_10[MAX_KERNEL_WIDTH];
+
+static int gauss_width;
+static int gaussderiv_width;
+
+typedef enum {
+    SIGMA_07 = 0,
+    SIGMA_36 = 1, 
+    SIGMA_10 = 2,
+    SIGMA_OTHER = 3  // Fallback for other sigma values
+} SigmaType;
+
+typedef enum {
+    KERNEL_GAUSSIAN = 0,
+    KERNEL_GAUSSIAN_DERIV = 1
+} KernelType;
+
 
 __global__ void convolveHorizKernel(
-  const float *imgin, 
-  float *imgout,
-  int ncols, 
-  int nrows,
-  const float *kernel, 
-  int kwidth
+    const float *imgin, float *imgout,
+    int ncols, int nrows,
+    int kwidth,
+    KernelType kernel_type,
+    float sigma
 );
 
 __global__ void convolveVertKernel(
-  const float *imgin, 
-  float *imgout,
-  int ncols, 
-  int nrows,
-  const float *kernel, 
-  int kwidth
+    const float *imgin, float *imgout,
+    int ncols, int nrows,
+    int kwidth,
+    KernelType kernel_type,
+    float sigma
 );
 
+/*
 __host__ void convolveImageHorizCUDAold(
   _KLT_FloatImage imgin,
   ConvolutionKernel kernel,
@@ -83,39 +106,49 @@ __host__ void computeGradientsCUDAold(
   float sigma,
   _KLT_FloatImage gradx,
   _KLT_FloatImage grady);
-
+*/
 
 // ------------------------------------------- v3.5 --------------------------------------
 
+__host__ __device__ SigmaType getSigmaType(float sigma);
+
+__device__ const float* getKernelPtr(KernelType kernel_type, SigmaType sigma_type);
+
 __host__ void convolveImageHorizCUDA(
   float *d_imgin,
-  ConvolutionKernel h_kernel,
   float *d_imgout,
   int ncols,
   int nrows,
   int kwidth,
+  KernelType kernel_type,
+  float sigma,
   cudaStream_t stream
 );
 
 __host__ void convolveImageVertCUDA(
   float *d_imgin,
-  ConvolutionKernel h_kernel,
   float *d_imgout,
   int ncols,
   int nrows,
   int kwidth,
+  KernelType kernel_type,
+  float sigma,
   cudaStream_t stream
 );
 
 __host__ void convolveSeparateCUDA(
   float *d_imgin,
-  ConvolutionKernel horiz_kernel,
-  ConvolutionKernel vert_kernel,
+  int horiz_kwidth,
+  KernelType horiz_kernel_type,
+  int vert_kwidth,
+  KernelType vert_kernel_type,
+  float sigma,
   float *d_imgout,
   int ncols,
   int nrows,
   cudaStream_t stream
 );
+
 
 __host__ void computeSmoothedImageCUDA(
   float *d_img,
@@ -153,6 +186,13 @@ __host__ void computeGradientsCUDA(
   int nrows,
   cudaStream_t stream
 );
+
+__host__ void computeKernelsConstant(
+  float sigma
+);
+
+__host__ void initializePrecomputedKernels();
+
 
   /* CPU */
 void _KLTToFloatImage(
