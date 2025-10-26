@@ -1,162 +1,169 @@
-/**********************************************************************
-This is the GPU version of example3.c from the KLT library.
-It calls a cuda implementation of KLTTrackFeatures instead of the CPU version.
-/********************************************************************/
-
-/********************************************************************
-Finds the 150 best features in an image and tracks them through the 
-next two images.  The sequential mode is set in order to speed
-processing.  The features are stored in a feature table, which is then
-saved to a text file; each feature list is also written to a PPM file.
-**********************************************************************/
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <pthread.h>
 #include "pnmio.h"
 #include "klt.h"
-
 #include "trackFeatures_cuda.h"
 #include <cuda_runtime.h>
 
+// Simple thread structure for async file reading
+typedef struct {
+    char filename[100];
+    unsigned char* buffer;
+    int ncols, nrows;
+    int done;
+} file_reader_t;
 
-// Function to count image files in dataset folder 
-int count_image_files(const char* folder_path) {
-  DIR *dir;
-  struct dirent *entry;
-  int count = 0;
-  
-  dir = opendir(folder_path);
-  if (dir == NULL) {
-    printf("Error: Cannot open directory %s\n", folder_path);
-    return -1;
-  }
-  
-  while ((entry = readdir(dir)) != NULL) {
-    // Check if filename matches pattern img*.pgm
-    if (strncmp(entry->d_name, "img", 3) == 0 && 
-        strstr(entry->d_name, ".pgm") != NULL) {
-      count++;
+void* read_file_thread(void* arg) {
+    file_reader_t* reader = (file_reader_t*)arg;
+    unsigned char* temp = pgmReadFile(reader->filename, NULL, &reader->ncols, &reader->nrows);
+    if (temp) {
+        memcpy(reader->buffer, temp, reader->ncols * reader->nrows);
+        free(temp);
     }
-  }
-  
-  closedir(dir);
-  return count;
+    reader->done = 1;
+    return NULL;
+}
+
+int count_image_files(const char* folder_path) {
+    DIR *dir;
+    struct dirent *entry;
+    int count = 0;
+    dir = opendir(folder_path);
+    if (dir == NULL) return -1;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strncmp(entry->d_name, "img", 3) == 0 && strstr(entry->d_name, ".pgm") != NULL) {
+            count++;
+        }
+    }
+    closedir(dir);
+    return count;
 }
 
 static cudaEvent_t start_event = NULL;
 static cudaEvent_t stop_event = NULL;
 
-#ifdef WIN32
-int RunExample3()
-#else
-int main(int argc, char *argv[])
-#endif
-{
-  unsigned char *img1, *img2;
-  char fnamein[100], fnameout[100];
-  char dataset_folder[200] = "dataset3";
-  //char dataset_folder[200] = "/kaggle/input/dataset3/dataset3";
-  char output_folder[200] = "output";
+int main(int argc, char *argv[]) {
+    unsigned char *img1, *img2, *img3;
+    char fname[100], fnameout[100];
+    char dataset_folder[200] = "/kaggle/input/dataset3/dataset3";
+    char output_folder[200] = "output";
 
-  KLT_TrackingContext tc;
-  KLT_FeatureList fl;
-  KLT_FeatureTable ft;
-  int nFeatures = 150, nFrames=10;
-  int ncols, nrows;
-  int i;
+    KLT_TrackingContext tc;
+    KLT_FeatureList fl;
+    KLT_FeatureTable ft;
+    int nFeatures = 150, nFrames;
+    int ncols, nrows;
+    int i;
 
-  // create output directory if it doesn't exist
-  mkdir(output_folder, 0755);
+    mkdir(output_folder, 0755);
+    if (argc > 1) strcpy(dataset_folder, argv[1]);
 
-  // check if dataset folder is provided as command-line argument
-  if (argc > 1) {
-    strcpy(dataset_folder, argv[1]);
-  }
+    nFrames = count_image_files(dataset_folder);
+    if (nFrames <= 0) {
+        printf("Error: No image files found in %s\n", dataset_folder);
+        return -1;
+    }
+    printf("Found %d image files in %s\n", nFrames, dataset_folder);
 
-  // count the number of image files in the dataset folder
-  nFrames = count_image_files(dataset_folder);
-  if (nFrames <= 0) {
-    printf("Error: No image files found in %s or cannot access folder\n", dataset_folder);
-    return -1;
-  }
-  printf("Found %d image files in %s\n", nFrames, dataset_folder);
+    tc = KLTCreateTrackingContext();
+    fl = KLTCreateFeatureList(nFeatures);
+    ft = KLTCreateFeatureTable(nFrames, nFeatures);
+    tc->sequentialMode = TRUE;
 
-  tc = KLTCreateTrackingContext();
-  fl = KLTCreateFeatureList(nFeatures);
-  ft = KLTCreateFeatureTable(nFrames, nFeatures);
-  tc->sequentialMode = TRUE; // USES SEQUENTIAL MODE
-  tc->writeInternalImages = FALSE;
-  tc->affineConsistencyCheck = -1;  /* set this to 2 to turn on affine consistency check */
- 
-  sprintf(fnamein, "%s/img0.pgm", dataset_folder);
-  img1 = pgmReadFile(fnamein, NULL, &ncols, &nrows);
-  img2 = (unsigned char *) malloc(ncols*nrows*sizeof(unsigned char));
+    // Load initial frames
+    sprintf(fname, "%s/img0.pgm", dataset_folder);
+    img1 = pgmReadFile(fname, NULL, &ncols, &nrows);
+    sprintf(fname, "%s/img1.pgm", dataset_folder); 
+    img2 = pgmReadFile(fname, NULL, &ncols, &nrows);
+    img3 = (unsigned char *)malloc(ncols * nrows * sizeof(unsigned char));
 
-  KLTSelectGoodFeatures(tc, img1, ncols, nrows, fl);
-  KLTStoreFeatureList(fl, ft, 0);
-  sprintf(fnameout, "%s/feat0.ppm", output_folder);
-  KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, fnameout);
+    // Start async read of frame 2
+    file_reader_t reader;
+    sprintf(reader.filename, "%s/img2.pgm", dataset_folder);
+    reader.buffer = img3;
+    reader.done = 0;
+    pthread_t thread;
+    if (nFrames > 2) {
+        pthread_create(&thread, NULL, read_file_thread, &reader);
+    }
 
-  // for each frame in the sequence... 
+    KLTSelectGoodFeatures(tc, img1, ncols, nrows, fl);
+    KLTStoreFeatureList(fl, ft, 0);
+    sprintf(fnameout, "%s/feat0.ppm", output_folder);
+    KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, fnameout);
 
-    // add cuda timings
-  /*
-  cudaEvent_t start, stop;
-  cudaEventCreate(&start);
-  cudaEventCreate(&stop);
-  cudaEventRecord(start,0);
-  */
-  if (!start_event) {
-    cudaEventCreate(&start_event);
-    cudaEventCreate(&stop_event);
-  }
+    if (!start_event) {
+        cudaEventCreate(&start_event);
+        cudaEventCreate(&stop_event);
+    }
 
-  allocateGPUResources(nFeatures, tc, ncols, nrows);
+    allocateGPUResources(nFeatures, tc, ncols, nrows);
+    cudaEventRecord(start_event, 0);
 
-  cudaEventRecord(start_event, 0);
-  for (i = 1 ; i < nFrames ; i++)  {
-    sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
-    pgmReadFile(fnamein, img2, &ncols, &nrows);
-    // track the features from img1 to img2 using CUDA implementation
-    kltTrackFeaturesCUDA(tc, img1, img2, ncols, nrows, fl);
+    for (i = 1; i < nFrames; i++) {
+        // Wait for async read to complete if needed
+        if (i == 1 && nFrames > 2) {
+            pthread_join(thread, NULL);
+        }
 
-#ifdef REPLACE
-    KLTReplaceLostFeatures(tc, img2, ncols, nrows, fl);
-#endif
-    KLTStoreFeatureList(fl, ft, i);
-    sprintf(fnameout, "%s/feat%d.ppm", output_folder, i);
-    KLTWriteFeatureListToPPM(fl, img2, ncols, nrows, fnameout);
-  }
+        // Start async read of NEXT next frame (i+2) if available
+        file_reader_t next_reader;
+        unsigned char* next_buffer = (unsigned char*)malloc(ncols * nrows);
+        if (i + 2 < nFrames) {
+            sprintf(next_reader.filename, "%s/img%d.pgm", dataset_folder, i+2);
+            next_reader.buffer = next_buffer;
+            next_reader.done = 0;
+            pthread_create(&thread, NULL, read_file_thread, &next_reader);
+        }
 
-  cudaEventRecord(stop_event, 0);
-  cudaEventSynchronize(stop_event);
-  
-  float total_ms = 0;
-  cudaEventElapsedTime(&total_ms, start_event, stop_event);
-  printf("GPU tracking time for %d frames: %f ms\n", nFrames-1, total_ms);
-  printf("Average per frame: %f ms\n", total_ms / (nFrames-1));
+        // Process tracking - file reading happens in parallel with GPU work!
+        kltTrackFeaturesCUDA(tc, img1, img2, img3, ncols, nrows, fl);
 
-  freeGPUResources();
-  /*
-    cudaEventRecord(stop,0);   // Stop timing
-    cudaEventSynchronize(stop);
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    printf("GPU tracking time for %d frames: %f ms\n", nFrames-1, milliseconds);
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-  */
-  KLTWriteFeatureTable(ft, "features.txt", "%5.1f");
-  KLTWriteFeatureTable(ft, "features.ft", NULL);
+        #ifdef REPLACE
+        KLTReplaceLostFeatures(tc, img2, ncols, nrows, fl);
+        #endif
+        
+        KLTStoreFeatureList(fl, ft, i);
+        sprintf(fnameout, "%s/feat%d.ppm", output_folder, i);
+        KLTWriteFeatureListToPPM(fl, img2, ncols, nrows, fnameout);
 
-  KLTFreeFeatureTable(ft);
-  KLTFreeFeatureList(fl);
-  KLTFreeTrackingContext(tc);
-  free(img1);
-  free(img2);
+        // Rotate buffers
+        free(img1);  // Free the oldest frame
+        img1 = img2;
+        img2 = img3;
+        
+        // Use the asynchronously loaded frame if available
+        if (i + 2 < nFrames) {
+            pthread_join(thread, NULL);  // Wait for the async read to finish
+            img3 = next_reader.buffer;
+        } else {
+            img3 = next_buffer;  // Just use the allocated buffer
+        }
+    }
 
-  return 0;
+    cudaEventRecord(stop_event, 0);
+    cudaEventSynchronize(stop_event);
+    
+    float total_ms = 0;
+    cudaEventElapsedTime(&total_ms, start_event, stop_event);
+    printf("GPU tracking time for %d frames: %f ms\n", nFrames-1, total_ms);
+    printf("Average per frame: %f ms\n", total_ms / (nFrames-1));
+
+    freeGPUResources();
+    KLTWriteFeatureTable(ft, "features.txt", "%5.1f");
+    KLTWriteFeatureTable(ft, "features.ft", NULL);
+
+    KLTFreeFeatureTable(ft);
+    KLTFreeFeatureList(fl);
+    KLTFreeTrackingContext(tc);
+    free(img1);
+    free(img2);
+    free(img3);
+
+    return 0;
 }

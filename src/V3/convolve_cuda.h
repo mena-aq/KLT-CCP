@@ -22,6 +22,7 @@ extern "C" {
 
 static void checkCuda(cudaError_t err, const char *msg);
 
+
 __global__ void convolveHorizKernel(
   const float *imgin, 
   float *imgout,
@@ -92,7 +93,8 @@ __host__ void convolveImageHorizCUDA(
   float *d_imgout,
   int ncols,
   int nrows,
-  int kwidth
+  int kwidth,
+  cudaStream_t stream
 );
 
 __host__ void convolveImageVertCUDA(
@@ -101,7 +103,8 @@ __host__ void convolveImageVertCUDA(
   float *d_imgout,
   int ncols,
   int nrows,
-  int kwidth
+  int kwidth,
+  cudaStream_t stream
 );
 
 __host__ void convolveSeparateCUDA(
@@ -110,7 +113,8 @@ __host__ void convolveSeparateCUDA(
   ConvolutionKernel vert_kernel,
   float *d_imgout,
   int ncols,
-  int nrows
+  int nrows,
+  cudaStream_t stream
 );
 
 __host__ void computeSmoothedImageCUDA(
@@ -118,7 +122,8 @@ __host__ void computeSmoothedImageCUDA(
   float sigma,
   float *d_smooth_img,
   int ncols,
-  int nrows
+  int nrows,
+  cudaStream_t stream
 );
 
 __global__ void subsampleKernel(
@@ -135,7 +140,8 @@ __host__ void computePyramidCUDA(
   int ncols,
   int nrows,
   int subsampling,
-  int nLevels
+  int nLevels,
+  cudaStream_t stream
 );
 
 __host__ void computeGradientsCUDA(
@@ -144,7 +150,8 @@ __host__ void computeGradientsCUDA(
   float *d_gradx,
   float *d_grady,
   int ncols,
-  int nrows
+  int nrows,
+  cudaStream_t stream
 );
 
   /* CPU */

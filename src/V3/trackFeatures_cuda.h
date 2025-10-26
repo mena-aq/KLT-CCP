@@ -92,6 +92,7 @@ __host__ void kltTrackFeaturesCUDA(
   KLT_TrackingContext h_tc,
   KLT_PixelType *h_img1,
   KLT_PixelType *h_img2,
+  KLT_PixelType *h_img3,
   int ncols,
   int nrows,
   KLT_FeatureList h_fl
