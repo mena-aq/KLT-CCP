@@ -15,6 +15,11 @@ do {                                                                        \
     }                                                                       \
 } while (0)
 
+// helper function to round up to nearest multiple of 32 for thread warps
+static inline int roundUp32(int x) {
+    return ((x + 31) / 32) * 32;
+}
+
 
 ////////////// THIS IS JUST FOR DEBUGGING /////////////////////////////
 // Add this function to verify pyramid contents
@@ -701,6 +706,220 @@ __global__ void trackFeatureKernel(
 }
 
 
+__global__ void trackFeatureKernelTest(
+	const float *d_pyramid1,
+	const float *d_pyramid1_gradx,
+	const float *d_pyramid1_grady,
+	const float *d_pyramid2,
+	const float *d_pyramid2_gradx,
+	const float *d_pyramid2_grady,
+	const float *d_in_x,
+	const float *d_in_y,
+	const int *d_in_val,
+	float *d_out_x,
+	float *d_out_y,
+	int *d_out_val,
+	int borderx,
+	int bordery,
+	int window_width,
+	int window_height,
+	float step_factor,
+	int max_iterations,
+	float small,
+	float th,
+	float max_residue
+)
+{
+    const float one_plus_eps = 1.001f;
+
+	int featureIdx = blockIdx.x;
+	int tid = threadIdx.y * blockDim.x + threadIdx.x;
+	int window_elems = window_width * window_height;
+	
+	// Only track features that are not lost
+	if (d_in_val[featureIdx] < 0) {
+		if (tid == 0) {
+			d_out_x[featureIdx] = -1.0f;
+			d_out_y[featureIdx] = -1.0f;
+			d_out_val[featureIdx] = d_in_val[featureIdx];
+		}
+		return;
+	}
+
+    // Bounds check: skip threads outside the window
+    if (tid >= window_elems) return;
+
+	int hw = window_width / 2;
+	int hh = window_height / 2;
+	int nPyramidLevels = c_nLevels;
+
+	// shared memory allocation
+	extern __shared__ float shared[];
+	float* imgdiff = shared; //imgdiff: first part of shared memory
+	float* gradx = imgdiff + window_width * window_height; //gradx: second part of shared memory
+	float* grady = gradx + window_width * window_height; //grady: third part of shared memory
+
+	// Shared variables for feature state 
+	__shared__ float s_x1, s_y1, s_x2, s_y2;
+	__shared__ float s_dx, s_dy;
+	__shared__ int s_status, s_continue;
+	__shared__ int s_iteration;
+
+	if (tid == 0) {
+		// Initialize coordinates
+		float xloc = d_in_x[featureIdx];
+		float yloc = d_in_y[featureIdx];
+		
+		// Transform to coarsest resolution
+		for (int r = nPyramidLevels - 1; r >= 0; r--) {
+			xloc /= c_subsampling; yloc /= c_subsampling;
+		}
+		s_x1 = xloc; s_y1 = yloc;
+		s_x2 = xloc; s_y2 = yloc;
+		s_status = KLT_TRACKED;
+	}
+	__syncthreads();
+
+	// Main pyramid levels loop
+	for (int r = nPyramidLevels - 1; r >= 0; r--) {
+		// If already lost, skip levels
+		if (s_status != KLT_TRACKED) break;
+
+		// Scale coordinates 
+		if (tid == 0) {
+			s_x1 *= c_subsampling; s_y1 *= c_subsampling;
+			s_x2 *= c_subsampling; s_y2 *= c_subsampling;
+		}
+		__syncthreads();
+
+		// Iterative refinement for this pyramid level
+		s_iteration = 0;
+		s_continue = 1;
+		
+		do {
+			// Add boundary check at start of each iteration (like CPU)
+			if (tid == 0) {
+				int nc = c_ncols[r];
+				int nr = c_nrows[r];
+				
+				// Exact CPU boundary check logic
+				if (s_x1 - hw < 0.0f || nc - (s_x1 + hw) < one_plus_eps ||
+					s_x2 - hw < 0.0f || nc - (s_x2 + hw) < one_plus_eps ||
+					s_y1 - hh < 0.0f || nr - (s_y1 + hh) < one_plus_eps ||
+					s_y2 - hh < 0.0f || nr - (s_y2 + hh) < one_plus_eps) {
+					s_status = KLT_OOB;
+					s_continue = 0;
+				}
+			}
+			__syncthreads();
+			
+			if (s_status != KLT_TRACKED) break;
+
+			// Each thread computes its window pixel
+			int i = threadIdx.x - hw;
+			int j = threadIdx.y - hh;
+			int idx = threadIdx.y * window_width + threadIdx.x;
+
+			// compute per-thread sample coordinates (pixel)
+			float samp_x1 = s_x1 + (float)i;
+			float samp_y1 = s_y1 + (float)j;
+			float samp_x2 = s_x2 + (float)i;
+			float samp_y2 = s_y2 + (float)j;
+
+			float i1 = interpolateCUDA(samp_x1, samp_y1, d_pyramid1, r);
+			float i2 = interpolateCUDA(samp_x2, samp_y2, d_pyramid2, r);
+			imgdiff[idx] = i1 - i2;
+
+			float gx1 = interpolateCUDA(samp_x1, samp_y1, d_pyramid1_gradx, r);
+			float gx2 = interpolateCUDA(samp_x2, samp_y2, d_pyramid2_gradx, r);
+			gradx[idx] = gx1 + gx2;
+			float gy1 = interpolateCUDA(samp_x1, samp_y1, d_pyramid1_grady, r);
+			float gy2 = interpolateCUDA(samp_x2, samp_y2, d_pyramid2_grady, r);
+			grady[idx] = gy1 + gy2;
+
+			__syncthreads();
+
+			if (tid == 0) {
+				// gradient matrix & error vector
+				float gxx = 0.0f, gxy = 0.0f, gyy = 0.0f, ex = 0.0f, ey = 0.0f;
+				int W = window_width * window_height;
+				for (int k = 0; k < W; ++k) {
+					float gx = gradx[k]; float gy = grady[k]; float diff = imgdiff[k];
+					gxx += gx*gx; gxy += gx*gy; gyy += gy*gy;
+					ex += diff * gx; ey += diff * gy;
+				}
+				ex *= step_factor; ey *= step_factor;
+				float det = gxx*gyy - gxy*gxy;
+				s_dx = 0.0f; s_dy = 0.0f;
+				// solve equation
+				if (det < small) {
+					s_status = KLT_SMALL_DET;
+					s_continue = 0; //if small det, stop
+				} else {
+					s_dx = (gyy*ex - gxy*ey)/det;
+					s_dy = (gxx*ey - gxy*ex)/det;
+					s_x2 += s_dx; s_y2 += s_dy;
+					// stop if step is small enough
+					s_continue = (fabsf(s_dx) >= th || fabsf(s_dy) >= th) ? 1 : 0;
+				}
+				s_iteration++;
+			}
+			__syncthreads();
+
+		} while (s_continue && s_iteration < max_iterations && s_status == KLT_TRACKED);
+
+		// check residue
+		if (s_status == KLT_TRACKED) {
+			// Each thread computes its window pixel for residue
+			int i = threadIdx.x - hw;
+			int j = threadIdx.y - hh;
+			int idx = threadIdx.y * window_width + threadIdx.x;
+			
+			float samp_x1_f = s_x1 + (float)i;
+			float samp_y1_f = s_y1 + (float)j;
+			float samp_x2_f = s_x2 + (float)i;
+			float samp_y2_f = s_y2 + (float)j;
+			imgdiff[idx] = interpolateCUDA(samp_x1_f, samp_y1_f, d_pyramid1, r) - interpolateCUDA(samp_x2_f, samp_y2_f, d_pyramid2, r);
+			__syncthreads();
+
+			if (tid == 0) {
+				int W = window_width * window_height;
+				float residue = sumAbsFloatWindowCUDA(imgdiff, window_width, window_height) / (float)W;
+				if (residue > max_residue) s_status = KLT_LARGE_RESIDUE;
+			}
+			__syncthreads();
+		}
+	}
+
+	// record final value and status of the feature
+	if (tid == 0) {
+		float final_x = s_x2;
+		float final_y = s_y2;
+		int final_val = s_status;
+
+		// bounds check
+		int nc = c_ncols[0];
+		int nr = c_nrows[0];
+
+		if (final_x - hw < borderx || final_x + hw >= nc - borderx ||
+			final_y - hh < bordery || final_y + hh >= nr - bordery) {
+			final_val = KLT_OOB;
+		}
+
+		if (final_val != KLT_TRACKED) {
+			d_out_x[featureIdx] = -1.0f;
+			d_out_y[featureIdx] = -1.0f;
+			d_out_val[featureIdx] = final_val;
+		} else {
+			d_out_x[featureIdx] = final_x;
+			d_out_y[featureIdx] = final_y;
+			d_out_val[featureIdx] = KLT_TRACKED;
+		}
+	}
+	
+};
+
+
 __host__ void kltTrackFeaturesCUDA(
   KLT_TrackingContext h_tc,
   KLT_PixelType *h_img1,
@@ -935,6 +1154,7 @@ __host__ void kltTrackFeaturesCUDA(
     // V3.3: update launch configuration occupancy (windowsize=blocksize)
 	dim3 blockSize(window_width,window_height);
     dim3 gridSize(numFeatures);
+    size_t sharedMemSize = window_width * window_height * sizeof(float) * 3;
 
     /*
     printf("=== BEFORE KERNEL LAUNCH (Frame 2→3) ===\n");
@@ -945,7 +1165,7 @@ __host__ void kltTrackFeaturesCUDA(
     printf("======================================\n");
     */
 
-	trackFeatureKernel<<<gridSize, blockSize,0,stream1>>>(
+	trackFeatureKernelTest<<<gridSize, blockSize,sharedMemSize,stream1>>>(
 		d_pyramid1,
 		d_pyramid1_gradx,
 		d_pyramid1_grady,
