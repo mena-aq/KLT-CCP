@@ -57,7 +57,7 @@ static void allocatePyramidBuffers(_KLT_Pyramid pyramid);
 
 __host__ void allocateGPUResources(int numFeatures, KLT_TrackingContext h_tc, int ncols, int nrows);
 
-
+__host__ void freeGPUResources();
 
 
 // CUDA version of sumAbsFloatWindow for GPU 
