@@ -376,6 +376,94 @@ void _KLTComputeSmoothedImage(
 
 // ------------------------------------------- v3.6 --------------------------------------
 
+
+__global__ void fusedConvolveSeparableKernel(
+    const float *imgin, float *imgout,
+    int ncols, int nrows,
+    int kwidth_horiz, KernelType horiz_kernel_type,
+    int kwidth_vert, KernelType vert_kernel_type,
+    float sigma)
+{
+    extern __shared__ float s_data[];
+    
+    // Get kernel pointers from constant memory
+    SigmaType sigma_type = getSigmaType(sigma);
+    const float *horiz_kernel = getKernelPtr(horiz_kernel_type, sigma_type);
+    const float *vert_kernel = getKernelPtr(vert_kernel_type, sigma_type);
+    
+    int radius_h = kwidth_horiz / 2;
+    int radius_v = kwidth_vert / 2;
+    
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int tid = threadIdx.y * blockDim.x + threadIdx.x;
+    
+    // Shared memory dimensions - large enough for both horizontal and vertical halo
+    int shared_width = blockDim.x + 2 * radius_h;
+    int shared_height = blockDim.y + 2 * radius_v;
+    int shared_size = shared_width * shared_height;
+    
+    // Cooperative loading of input tile with halo regions
+    for (int pos = tid; pos < shared_size; pos += blockDim.x * blockDim.y) {
+        int load_y = pos / shared_width;
+        int load_x = pos % shared_width;
+        
+        int global_y = blockIdx.y * blockDim.y - radius_v + load_y;
+        int global_x = blockIdx.x * blockDim.x - radius_h + load_x;
+        
+        if (global_x >= 0 && global_x < ncols && global_y >= 0 && global_y < nrows) {
+            s_data[load_y * shared_width + load_x] = imgin[global_y * ncols + global_x];
+        } else {
+            s_data[load_y * shared_width + load_x] = 0.0f;
+        }
+    }
+    __syncthreads();
+    
+    if (x >= ncols || y >= nrows) return;
+    
+    // Step 1: Horizontal convolution
+    float horiz_result = 0.0f;
+    bool valid_horiz = (x >= radius_h && x < ncols - radius_h);
+    
+    if (valid_horiz) {
+        int shared_x = threadIdx.x + radius_h;
+        int shared_y = threadIdx.y + radius_v;
+        int shared_idx = shared_y * shared_width + shared_x;
+        
+        for (int k = 0; k < kwidth_horiz; k++) {
+            horiz_result += s_data[shared_idx - radius_h + k] * horiz_kernel[kwidth_horiz - 1 - k];
+        }
+    }
+    
+    // Step 2: Store horizontal results in shared memory for vertical pass
+    // We reuse the same shared memory, but reorganize for vertical access
+    __syncthreads();
+    
+    // Store horizontal result in a compact region of shared memory
+    if (valid_horiz) {
+        int store_idx = threadIdx.y * blockDim.x + threadIdx.x;
+        s_data[store_idx] = horiz_result;
+    }
+    __syncthreads();
+    
+    // Step 3: Vertical convolution on horizontal results
+    if (x >= radius_h && x < ncols - radius_h && y >= radius_v && y < nrows - radius_v) {
+        float vert_result = 0.0f;
+        
+        for (int k = 0; k < kwidth_vert; k++) {
+            int read_y = threadIdx.y - radius_v + k;
+            if (read_y >= 0 && read_y < blockDim.y) {
+                int read_idx = read_y * blockDim.x + threadIdx.x;
+                vert_result += s_data[read_idx] * vert_kernel[kwidth_vert - 1 - k];
+            }
+        }
+        imgout[y * ncols + x] = vert_result;
+    } else if (x < ncols && y < nrows) {
+        // Border handling
+        imgout[y * ncols + x] = 0.0f;
+    }
+}
+
 // Helper function to determine which sigma we're using
 __host__ __device__ SigmaType getSigmaType(float sigma) {
     if (fabsf(sigma - 0.7f) < 0.05f) return SIGMA_07;
@@ -599,6 +687,177 @@ __host__ void convolveImageVertCUDA(
   //cudaFree(d_kernel);
 }
 
+// __host__ void convolveSeparateCUDA(
+//   float *d_imgin,
+//   int horiz_kwidth,
+//   KernelType horiz_kernel_type,
+//   int vert_kwidth,
+//   KernelType vert_kernel_type,
+//   float sigma,
+//   float *d_imgout,
+//   int ncols,
+//   int nrows,
+//   cudaStream_t stream
+// )
+// {
+   
+//   // Create temporary image
+//   float *d_tmpimg = NULL;
+//   size_t img_bytes = (size_t)ncols * (size_t)nrows * sizeof(float);
+//   CUDA_CHECK(cudaMalloc((void**)&d_tmpimg, img_bytes));
+//   CUDA_CHECK(cudaMemsetAsync(d_tmpimg, 0, img_bytes,stream));
+
+//   // Use shared memory versions
+//   convolveImageHorizCUDA(d_imgin, d_tmpimg, ncols, nrows, horiz_kwidth, horiz_kernel_type, sigma, stream);
+//   convolveImageVertCUDA(d_tmpimg, d_imgout, ncols, nrows, vert_kwidth, vert_kernel_type, sigma, stream);
+
+//   // Free memory
+//   cudaFree(d_tmpimg);
+// }
+
+// __host__ void computeSmoothedImageCUDA(
+//   float *d_img,
+//   float sigma,
+//   float *d_smooth_img,
+//   int ncols,
+//   int nrows,
+//   cudaStream_t stream
+// )
+// {
+//   assert(d_smooth_img != NULL);
+
+//   /* Compute kernel, if necessary; gauss_deriv is not used */
+//   /*
+//   if (fabsf(sigma - sigma_last) > 0.05f)
+//     _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
+//   */
+
+//   SigmaType sigma_type = getSigmaType(sigma);
+//   if (fabsf(sigma - sigma_last) > 0.05f) {
+//       if (sigma_type == SIGMA_OTHER) {
+//           // Only recompute for non-precomputed sigmas
+//           computeKernelsConstant(sigma);
+//       } else {
+//           // For precomputed sigmas, just update widths
+//           ConvolutionKernel gauss, gaussderiv;
+//           _computeKernels(sigma, &gauss, &gaussderiv);
+//           gauss_width = gauss.width;
+//           gaussderiv_width = gaussderiv.width;
+//           sigma_last = sigma;
+//           printf("Using precomputed kernels for sigma %f\n", sigma);
+//       }
+//   }
+
+//   convolveSeparateCUDA(d_img, gauss_width, KERNEL_GAUSSIAN, gauss_width, KERNEL_GAUSSIAN, 
+//                        sigma, d_smooth_img, ncols, nrows, stream);
+// }
+
+__host__ void computeSmoothedImageCUDA(
+  float *d_img,
+  float sigma,
+  float *d_smooth_img,
+  int ncols,
+  int nrows,
+  cudaStream_t stream)
+{
+  assert(d_smooth_img != NULL);
+
+  SigmaType sigma_type = getSigmaType(sigma);
+  if (fabsf(sigma - sigma_last) > 0.05f) {
+      if (sigma_type == SIGMA_OTHER) {
+          computeKernelsConstant(sigma);
+      } else {
+          ConvolutionKernel gauss, gaussderiv;
+          _computeKernels(sigma, &gauss, &gaussderiv);
+          gauss_width = gauss.width;
+          gaussderiv_width = gaussderiv.width;
+          sigma_last = sigma;
+          printf("Using precomputed kernels for sigma %f\n", sigma);
+      }
+  }
+
+  // Use fused kernel instead of separate convolutions
+  convolveSeparateCUDA(d_img, 
+      gauss_width, KERNEL_GAUSSIAN,
+      gauss_width, KERNEL_GAUSSIAN,
+      sigma, d_smooth_img, ncols, nrows, stream);
+}
+
+
+// __host__ void computeGradientsCUDA(
+//   float *d_img,
+//   float sigma,
+//   float *d_gradx,
+//   float *d_grady,
+//   int ncols,
+//   int nrows,
+//   cudaStream_t stream
+// )
+// {
+//   /* Compute kernels, if necessary */
+//   /*
+//   if (fabsf(sigma - sigma_last) > 0.05f)
+//     _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
+//   */
+  
+//   SigmaType sigma_type = getSigmaType(sigma);
+//   if (fabsf(sigma - sigma_last) > 0.05f) {
+//       if (sigma_type == SIGMA_OTHER) {
+//           // Only recompute for non-precomputed sigmas
+//           computeKernelsConstant(sigma);
+//       } else {
+//           // For precomputed sigmas, just update widths
+//           ConvolutionKernel gauss, gaussderiv;
+//           _computeKernels(sigma, &gauss, &gaussderiv);
+//           gauss_width = gauss.width;
+//           gaussderiv_width = gaussderiv.width;
+//           sigma_last = sigma;
+//           printf("Using precomputed kernels for sigma %f\n", sigma);
+//       }
+//   }
+
+//   convolveSeparateCUDA(d_img, gaussderiv_width, KERNEL_GAUSSIAN_DERIV,
+//                        gauss_width, KERNEL_GAUSSIAN, sigma, d_gradx, ncols, nrows,stream);
+//   convolveSeparateCUDA(d_img, gauss_width, KERNEL_GAUSSIAN,
+//                        gaussderiv_width, KERNEL_GAUSSIAN_DERIV, sigma, d_grady, ncols, nrows,stream);
+// }
+
+__host__ void computeGradientsCUDA(
+  float *d_img,
+  float sigma,
+  float *d_gradx,
+  float *d_grady,
+  int ncols,
+  int nrows,
+  cudaStream_t stream)
+{
+  SigmaType sigma_type = getSigmaType(sigma);
+  if (fabsf(sigma - sigma_last) > 0.05f) {
+      if (sigma_type == SIGMA_OTHER) {
+          computeKernelsConstant(sigma);
+      } else {
+          ConvolutionKernel gauss, gaussderiv;
+          _computeKernels(sigma, &gauss, &gaussderiv);
+          gauss_width = gauss.width;
+          gaussderiv_width = gaussderiv.width;
+          sigma_last = sigma;
+          printf("Using precomputed kernels for sigma %f\n", sigma);
+      }
+  }
+
+  // Use fused kernels for both gradient computations
+  convolveSeparateCUDA(d_img,
+      gaussderiv_width, KERNEL_GAUSSIAN_DERIV,
+      gauss_width, KERNEL_GAUSSIAN,
+      sigma, d_gradx, ncols, nrows, stream);
+      
+  convolveSeparateCUDA(d_img,
+      gauss_width, KERNEL_GAUSSIAN,
+      gaussderiv_width, KERNEL_GAUSSIAN_DERIV,
+      sigma, d_grady, ncols, nrows, stream);
+}
+
+
 __host__ void convolveSeparateCUDA(
   float *d_imgin,
   int horiz_kwidth,
@@ -609,98 +868,34 @@ __host__ void convolveSeparateCUDA(
   float *d_imgout,
   int ncols,
   int nrows,
-  cudaStream_t stream
-)
+  cudaStream_t stream)
 {
-   
-  // Create temporary image
-  float *d_tmpimg = NULL;
-  size_t img_bytes = (size_t)ncols * (size_t)nrows * sizeof(float);
-  CUDA_CHECK(cudaMalloc((void**)&d_tmpimg, img_bytes));
-  CUDA_CHECK(cudaMemsetAsync(d_tmpimg, 0, img_bytes,stream));
-
-  // Use shared memory versions
-  convolveImageHorizCUDA(d_imgin, d_tmpimg, ncols, nrows, horiz_kwidth, horiz_kernel_type, sigma, stream);
-  convolveImageVertCUDA(d_tmpimg, d_imgout, ncols, nrows, vert_kwidth, vert_kernel_type, sigma, stream);
-
-  // Free memory
-  cudaFree(d_tmpimg);
+    // Launch configuration - tune these for optimal performance
+    dim3 blockSize(16, 16);  // 256 threads
+    dim3 gridSize((ncols + blockSize.x - 1) / blockSize.x,
+                  (nrows + blockSize.y - 1) / blockSize.y);
+    
+    // Calculate shared memory requirement
+    int radius_h = horiz_kwidth / 2;
+    int radius_v = vert_kwidth / 2;
+    int shared_width = blockSize.x + 2 * radius_h;
+    int shared_height = blockSize.y + 2 * radius_v;
+    size_t shared_mem_size = shared_width * shared_height * sizeof(float);
+    
+    // Add space for storing horizontal results (max blockSize.x * blockSize.y)
+    size_t horiz_storage_size = blockSize.x * blockSize.y * sizeof(float);
+    shared_mem_size = max(shared_mem_size, horiz_storage_size);
+    
+    // Launch fused kernel - eliminates temporary buffer!
+    fusedConvolveSeparableKernel<<<gridSize, blockSize, shared_mem_size, stream>>>(
+        d_imgin, d_imgout, ncols, nrows,
+        horiz_kwidth, horiz_kernel_type,
+        vert_kwidth, vert_kernel_type,
+        sigma);
+    
+    CUDA_CHECK(cudaGetLastError());
 }
 
-__host__ void computeSmoothedImageCUDA(
-  float *d_img,
-  float sigma,
-  float *d_smooth_img,
-  int ncols,
-  int nrows,
-  cudaStream_t stream
-)
-{
-  assert(d_smooth_img != NULL);
-
-  /* Compute kernel, if necessary; gauss_deriv is not used */
-  /*
-  if (fabsf(sigma - sigma_last) > 0.05f)
-    _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
-  */
-
-  SigmaType sigma_type = getSigmaType(sigma);
-  if (fabsf(sigma - sigma_last) > 0.05f) {
-      if (sigma_type == SIGMA_OTHER) {
-          // Only recompute for non-precomputed sigmas
-          computeKernelsConstant(sigma);
-      } else {
-          // For precomputed sigmas, just update widths
-          ConvolutionKernel gauss, gaussderiv;
-          _computeKernels(sigma, &gauss, &gaussderiv);
-          gauss_width = gauss.width;
-          gaussderiv_width = gaussderiv.width;
-          sigma_last = sigma;
-          printf("Using precomputed kernels for sigma %f\n", sigma);
-      }
-  }
-
-  convolveSeparateCUDA(d_img, gauss_width, KERNEL_GAUSSIAN, gauss_width, KERNEL_GAUSSIAN, 
-                       sigma, d_smooth_img, ncols, nrows, stream);
-}
-
-__host__ void computeGradientsCUDA(
-  float *d_img,
-  float sigma,
-  float *d_gradx,
-  float *d_grady,
-  int ncols,
-  int nrows,
-  cudaStream_t stream
-)
-{
-  /* Compute kernels, if necessary */
-  /*
-  if (fabsf(sigma - sigma_last) > 0.05f)
-    _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
-  */
-  
-  SigmaType sigma_type = getSigmaType(sigma);
-  if (fabsf(sigma - sigma_last) > 0.05f) {
-      if (sigma_type == SIGMA_OTHER) {
-          // Only recompute for non-precomputed sigmas
-          computeKernelsConstant(sigma);
-      } else {
-          // For precomputed sigmas, just update widths
-          ConvolutionKernel gauss, gaussderiv;
-          _computeKernels(sigma, &gauss, &gaussderiv);
-          gauss_width = gauss.width;
-          gaussderiv_width = gaussderiv.width;
-          sigma_last = sigma;
-          printf("Using precomputed kernels for sigma %f\n", sigma);
-      }
-  }
-
-  convolveSeparateCUDA(d_img, gaussderiv_width, KERNEL_GAUSSIAN_DERIV,
-                       gauss_width, KERNEL_GAUSSIAN, sigma, d_gradx, ncols, nrows,stream);
-  convolveSeparateCUDA(d_img, gauss_width, KERNEL_GAUSSIAN,
-                       gaussderiv_width, KERNEL_GAUSSIAN_DERIV, sigma, d_grady, ncols, nrows,stream);
-}
 
 __global__ void subsampleKernel(
     const float *d_src, float *d_dst,
