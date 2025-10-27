@@ -58,7 +58,7 @@ int main(int argc, char *argv[])
   unsigned char *img1, *img2, *img3;
   char fnamein[100], fnameout[100];
   char fnamein_next[100];
-  char dataset_folder[200] = "dataset3";
+  char dataset_folder[200] = "../../data/dataset3"; // default folder
   //char dataset_folder[200] = "/kaggle/input/dataset3/dataset3";
   char output_folder[200] = "output";
 
@@ -76,7 +76,7 @@ int main(int argc, char *argv[])
 
   // check if dataset folder is provided as command-line argument
   if (argc > 1) {
-    strcpy(dataset_folder, argv[1]);
+    sprintf(dataset_folder, "../../data/%s", argv[1]);
   }
 
   // count the number of image files in the dataset folder
