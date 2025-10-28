@@ -47,7 +47,7 @@ int main(int argc, char *argv[])
 {
   unsigned char *img1, *img2;
   char fnamein[100], fnameout[100];
-  char dataset_folder[200] = "dataset3"; // default folder
+  char dataset_folder[200] = "../../data/dataset3"; // default folder
   char output_folder[200] = "output";
 
   KLT_TrackingContext tc;
@@ -62,7 +62,7 @@ int main(int argc, char *argv[])
 
   // check if dataset folder is provided as command-line argument
   if (argc > 1) {
-    strcpy(dataset_folder, argv[1]);
+    sprintf(dataset_folder, "../../data/%s", argv[1]);
   }
 
   // count the number of image files in the dataset folder
@@ -107,7 +107,7 @@ int main(int argc, char *argv[])
   // End timing and calculate elapsed time
   clock_t end_time = clock();
   double elapsed_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
-  printf("Tracking time: %.3f seconds\n", elapsed_time);
+  printf("Tracking time: %.3f ms\n", elapsed_time*1000);
   
   KLTWriteFeatureTable(ft, "features.txt", "%5.1f");
   KLTWriteFeatureTable(ft, "features.ft", NULL);

@@ -55,11 +55,14 @@ int RunExample3()
 int main(int argc, char *argv[])
 #endif
 {
-  unsigned char *img1, *img2;
+  unsigned char *img1, *img2, *img3;
   char fnamein[100], fnameout[100];
-  char dataset_folder[200] = "dataset3";
+  char fnamein_next[100];
+  char dataset_folder[200] = "../../data/dataset3"; // default folder
   //char dataset_folder[200] = "/kaggle/input/dataset3/dataset3";
   char output_folder[200] = "output";
+
+  KLT_PixelType* frame_buffers[3];
 
   KLT_TrackingContext tc;
   KLT_FeatureList fl;
@@ -73,7 +76,7 @@ int main(int argc, char *argv[])
 
   // check if dataset folder is provided as command-line argument
   if (argc > 1) {
-    strcpy(dataset_folder, argv[1]);
+    sprintf(dataset_folder, "../../data/%s", argv[1]);
   }
 
   // count the number of image files in the dataset folder
@@ -94,21 +97,13 @@ int main(int argc, char *argv[])
   sprintf(fnamein, "%s/img0.pgm", dataset_folder);
   img1 = pgmReadFile(fnamein, NULL, &ncols, &nrows);
   img2 = (unsigned char *) malloc(ncols*nrows*sizeof(unsigned char));
+  img3 = (unsigned char *) malloc(ncols*nrows*sizeof(unsigned char));
 
   KLTSelectGoodFeatures(tc, img1, ncols, nrows, fl);
   KLTStoreFeatureList(fl, ft, 0);
   sprintf(fnameout, "%s/feat0.ppm", output_folder);
   KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, fnameout);
 
-  // for each frame in the sequence... 
-
-    // add cuda timings
-  /*
-  cudaEvent_t start, stop;
-  cudaEventCreate(&start);
-  cudaEventCreate(&stop);
-  cudaEventRecord(start,0);
-  */
   if (!start_event) {
     cudaEventCreate(&start_event);
     cudaEventCreate(&stop_event);
@@ -120,8 +115,19 @@ int main(int argc, char *argv[])
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
     pgmReadFile(fnamein, img2, &ncols, &nrows);
+
+    if (i + 1 < nFrames) {
+        sprintf(fnamein_next, "%s/img%d.pgm", dataset_folder, i+1);
+        pgmReadFile(fnamein_next, img3, &ncols, &nrows);
+    } else {
+        // Last frame - use dummy data or same as current frame
+        memcpy(img3, img2, ncols * nrows * sizeof(KLT_PixelType));
+        // Or: pgmReadFile(fnamein, img3, &ncols, &nrows); // same as current
+    }
+    
+    pgmReadFile(fnamein_next,img3,&ncols,&nrows);
     // track the features from img1 to img2 using CUDA implementation
-    kltTrackFeaturesCUDA(tc, img1, img2, ncols, nrows, fl);
+    kltTrackFeaturesCUDA(tc, img1, img2, img3, ncols, nrows, fl);
 
 #ifdef REPLACE
     KLTReplaceLostFeatures(tc, img2, ncols, nrows, fl);
@@ -140,15 +146,7 @@ int main(int argc, char *argv[])
   printf("Average per frame: %f ms\n", total_ms / (nFrames-1));
 
   freeGPUResources();
-  /*
-    cudaEventRecord(stop,0);   // Stop timing
-    cudaEventSynchronize(stop);
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    printf("GPU tracking time for %d frames: %f ms\n", nFrames-1, milliseconds);
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-  */
+
   KLTWriteFeatureTable(ft, "features.txt", "%5.1f");
   KLTWriteFeatureTable(ft, "features.ft", NULL);
 
