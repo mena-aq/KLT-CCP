@@ -398,23 +398,21 @@ __device__ const float* getKernelPtr(KernelType kernel_type, SigmaType sigma_typ
     }
 }
 
+
 __global__ void convolveHorizKernel(
     const float *imgin, float *imgout,
     int ncols, int nrows,
     int kwidth,
     KernelType kernel_type,
-    float sigma)
+    float sigma
+)
 {
     extern __shared__ float s_data[];
 
-     SigmaType sigma_type;
-    if (fabsf(sigma - 0.7f) < 0.05f) sigma_type = SIGMA_07;
-    else if (fabsf(sigma - 3.6f) < 0.05f) sigma_type = SIGMA_36;
-    else if (fabsf(sigma - 1.0f) < 0.05f) sigma_type = SIGMA_10;
-    else sigma_type = SIGMA_10;  // Fallback
+    SigmaType sigma_type = getSigmaType(sigma);
     const float *kernel = getKernelPtr(kernel_type,sigma_type);
+
     int radius = kwidth / 2;
-    
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     
@@ -426,7 +424,8 @@ __global__ void convolveHorizKernel(
     if (x < ncols && y < nrows) {
         s_data[shared_idx + radius] = imgin[y * ncols + x];
     }
-    
+
+/*
     // Load left halo
     if (threadIdx.x < radius && x >= radius) {
         int left_x = x - radius;
@@ -436,6 +435,18 @@ __global__ void convolveHorizKernel(
     // Load right halo  
     if (threadIdx.x >= blockDim.x - radius && x < ncols - radius) {
         int right_x = x + radius;
+        s_data[shared_idx + 2 * radius] = imgin[y * ncols + right_x];
+    }
+*/
+    // Load left halo using all threads for coalescing
+    int left_x = blockIdx.x * blockDim.x + threadIdx.x - radius;
+    if (left_x >= 0 && left_x < ncols && y < nrows) {
+        s_data[shared_idx] = imgin[y * ncols + left_x];
+    }
+    
+    // Load right halo using all threads for coalescing  
+    int right_x = blockIdx.x * blockDim.x + threadIdx.x + radius;
+    if (right_x < ncols && y < nrows) {
         s_data[shared_idx + 2 * radius] = imgin[y * ncols + right_x];
     }
     
@@ -456,6 +467,7 @@ __global__ void convolveHorizKernel(
     }
     imgout[y * ncols + x] = sum;
 }
+ 
 
 __global__ void convolveVertKernel(
     const float *imgin, float *imgout,
@@ -467,11 +479,7 @@ __global__ void convolveVertKernel(
 {
     extern __shared__ float s_data[];
 
-     SigmaType sigma_type;
-    if (fabsf(sigma - 0.7f) < 0.05f) sigma_type = SIGMA_07;
-    else if (fabsf(sigma - 3.6f) < 0.05f) sigma_type = SIGMA_36;
-    else if (fabsf(sigma - 1.0f) < 0.05f) sigma_type = SIGMA_10;
-    else sigma_type = SIGMA_10;  // Fallback
+    SigmaType sigma_type = getSigmaType(sigma);
     const float *kernel = getKernelPtr(kernel_type,sigma_type);
     int radius = kwidth / 2;
     
@@ -481,7 +489,7 @@ __global__ void convolveVertKernel(
     // Calculate shared memory dimensions
     int shared_height = blockDim.y + 2 * radius;
     int shared_idx = threadIdx.x * shared_height + threadIdx.y;
-    
+ /*   
     // Load main data to shared memory
     if (x < ncols && y < nrows) {
         s_data[shared_idx + radius] = imgin[y * ncols + x];
@@ -498,6 +506,23 @@ __global__ void convolveVertKernel(
         int bottom_y = y + radius;
         s_data[shared_idx + 2 * radius] = imgin[bottom_y * ncols + x];
     }
+ */
+    // Load main data - COALESCED access pattern
+    if (x < ncols && y < nrows) {
+        s_data[shared_idx + radius] = imgin[y * ncols + x];
+    }
+    
+    // Load top halo - COALESCED: all threads in warp load consecutive columns
+    int top_y = blockIdx.y * blockDim.y + threadIdx.y - radius;
+    if (top_y >= 0 && top_y < nrows && x < ncols) {
+        s_data[shared_idx] = imgin[top_y * ncols + x];
+    }
+    
+    // Load bottom halo - COALESCED
+    int bottom_y = blockIdx.y * blockDim.y + threadIdx.y + radius;
+    if (bottom_y < nrows && x < ncols) {
+        s_data[shared_idx + 2 * radius] = imgin[bottom_y * ncols + x];
+    }
     
     __syncthreads();
     
@@ -511,10 +536,16 @@ __global__ void convolveVertKernel(
     
     // Convolve from shared memory
     float sum = 0.0f;
+/*
     for (int k = 0; k < kwidth; k++) {
         sum += s_data[shared_idx + k] * kernel[kwidth - 1 - k];
     }
+*/
+    for (int k = 0; k < kwidth; k++) {
+        sum += s_data[threadIdx.x * shared_height + (threadIdx.y + k)] * kernel[kwidth - 1 - k];
+    }
     imgout[y * ncols + x] = sum;
+
 }
 
 __host__ void convolveImageHorizCUDA(
@@ -558,6 +589,7 @@ __host__ void convolveImageHorizCUDA(
   //cudaFree(d_kernel);
 }
 
+
 __host__ void convolveImageVertCUDA(
   float *d_imgin,
   float *d_imgout,
@@ -597,6 +629,75 @@ __host__ void convolveImageVertCUDA(
 
   // Free device memory
   //cudaFree(d_kernel);
+}
+
+
+__global__ void transposeKernel(
+    const float *input,
+    float *output,
+    int width, int height)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    if (x < width && y < height) {
+        // Transpose: output[col][row] = input[row][col]
+        output[x * height + y] = input[y * width + x];
+    }
+}
+
+__host__ void convolveImageVertCUDATranspose(
+    float *d_imgin, 
+    float *d_imgout,
+    int ncols, 
+    int nrows, 
+    int kwidth,
+    KernelType kernel_type, 
+    float sigma,
+    cudaStream_t stream)
+{
+    assert(d_imgin != d_imgout);
+
+    // Allocate temporaries
+    float *d_transposed_in, *d_transposed_out;
+    size_t image_size = (size_t)ncols * nrows * sizeof(float);
+    CUDA_CHECK(cudaMalloc(&d_transposed_in, image_size));
+    CUDA_CHECK(cudaMalloc(&d_transposed_out, image_size));
+
+    dim3 blockSize(16, 16);
+    
+    // Step 1: Forward transpose - original dimensions
+    dim3 gridForward((ncols + blockSize.x - 1) / blockSize.x, 
+                     (nrows + blockSize.y - 1) / blockSize.y);
+    transposeKernel<<<gridForward, blockSize, 0, stream>>>(
+        d_imgin, d_transposed_in, ncols, nrows);
+
+    // Step 2: Horizontal convolution on TRANSPOSED data
+    // After transpose: width = nrows, height = ncols
+    int transposed_width = nrows;   // original height becomes width
+    int transposed_height = ncols;  // original width becomes height
+    
+    dim3 gridConv((transposed_width + blockSize.x - 1) / blockSize.x, 
+                  (transposed_height + blockSize.y - 1) / blockSize.y);
+    
+    // **FIXED: Use HORIZONTAL shared memory calculation**
+    int radius = kwidth / 2;
+    int shared_width = blockSize.x + 2 * radius;  // For horizontal convolution
+    size_t shared_mem_size = (shared_width * blockSize.y) * sizeof(float);
+    
+    convolveHorizKernel<<<gridConv, blockSize, shared_mem_size, stream>>>(
+        d_transposed_in, d_transposed_out, 
+        transposed_width, transposed_height,  // nrows, ncols
+        kwidth, kernel_type, sigma);
+
+    // Step 3: Inverse transpose - transposed dimensions
+    dim3 gridInverse((transposed_width + blockSize.x - 1) / blockSize.x, 
+                     (transposed_height + blockSize.y - 1) / blockSize.y);
+    transposeKernel<<<gridInverse, blockSize, 0, stream>>>(
+        d_transposed_out, d_imgout, transposed_width, transposed_height);
+
+    CUDA_CHECK(cudaFree(d_transposed_out));
+    CUDA_CHECK(cudaFree(d_transposed_in));
 }
 
 __host__ void convolveSeparateCUDA(
@@ -656,7 +757,7 @@ __host__ void computeSmoothedImageCUDA(
           gauss_width = gauss.width;
           gaussderiv_width = gaussderiv.width;
           sigma_last = sigma;
-          printf("Using precomputed kernels for sigma %f\n", sigma);
+          //printf("Using precomputed kernels for sigma %f\n", sigma);
       }
   }
 
@@ -692,7 +793,7 @@ __host__ void computeGradientsCUDA(
           gauss_width = gauss.width;
           gaussderiv_width = gaussderiv.width;
           sigma_last = sigma;
-          printf("Using precomputed kernels for sigma %f\n", sigma);
+          //printf("Using precomputed kernels for sigma %f\n", sigma);
       }
   }
 
