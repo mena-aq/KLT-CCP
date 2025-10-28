@@ -18,7 +18,11 @@ saved to a text file; each feature list is also written to a PPM file.
 #include "pnmio.h"
 #include "klt.h"
 
+#include <time.h>  // for timing
+
 #include "trackFeatures_cuda.h"
+#include "selectGoodFeatures_cuda.h"
+
 #include <cuda_runtime.h>
 
 
@@ -99,7 +103,12 @@ int main(int argc, char *argv[])
   img2 = (unsigned char *) malloc(ncols*nrows*sizeof(unsigned char));
   img3 = (unsigned char *) malloc(ncols*nrows*sizeof(unsigned char));
 
+  clock_t t0 = clock();
   KLTSelectGoodFeatures(tc, img1, ncols, nrows, fl);
+  clock_t t1 = clock();
+  double elapsed_sec = (double)(t1 - t0) / CLOCKS_PER_SEC;
+  printf("KLTSelectGoodFeaturesCUDA time: %.6f seconds\n", elapsed_sec);
+
   KLTStoreFeatureList(fl, ft, 0);
   sprintf(fnameout, "%s/feat0.ppm", output_folder);
   KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, fnameout);

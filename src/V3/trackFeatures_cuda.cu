@@ -1088,6 +1088,8 @@ __host__ void kltTrackFeaturesCUDA(
 
 
 	/* Write internal images */
+    // commenting out bc i dont think its serving any purpose 
+    /*
 	if (h_tc->writeInternalImages)  {
 		char fname[80];
 		for (i = 0 ; i < h_tc->nPyramidLevels ; i++)  {
@@ -1105,6 +1107,7 @@ __host__ void kltTrackFeaturesCUDA(
 			_KLTWriteFloatImageToPGM(pyramid2_grady->img[i], fname);
 		}
 	}
+    */
 
 
 	// prepare parameters for kernel launch

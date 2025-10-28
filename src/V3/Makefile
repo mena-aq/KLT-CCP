@@ -8,6 +8,9 @@ CC = gcc
 FLAG1 = -DNDEBUG
 CFLAGS = $(FLAG1) -O3
 NVCCFLAGS = -O3 -Wno-deprecated-gpu-targets -diag-suppress 2464 -gencode arch=compute_86,code=sm_86
+# Debug flags (uncomment for debugging)
+# CFLAGS = -g -O0 -DDEBUG
+# NVCCFLAGS = -g -G -O0 -DDEBUG -Wno-deprecated-gpu-targets -diag-suppress 2464 -gencode arch=compute_86,code=sm_86
 GPROF= -pg
 CUDA_LIB = -lcudart
 CUDA_INCLUDE = -I/opt/nvidia/hpc_sdk/Linux_x86_64/25.7/cuda/12.9/include
@@ -21,7 +24,7 @@ EXAMPLES_GPU = example3.c
 EXAMPLES_CPU = example3_cpu.c  # We'll create this
 ARCH = convolve.c error.c pnmio.c pyramid.c selectGoodFeatures.c \
        storeFeatures.c trackFeatures.c klt.c klt_util.c writeFeatures.c
-CUDA_SRCS = convolve_cuda.cu trackFeatures_cuda.cu
+CUDA_SRCS = convolve_cuda.cu trackFeatures_cuda.cu selectGoodFeatures_cuda.cu
 
 # Object files for different builds
 CPU_OBJECTS = $(ARCH:.c=.o) $(CUDA_SRCS:.cu=_cpu.o)
@@ -70,6 +73,9 @@ convolve_cuda_cpu.o: convolve.c
 	$(CC) -c $(CFLAGS) $< -o $@
 
 trackFeatures_cuda_cpu.o: trackFeatures.c  
+	$(CC) -c $(CFLAGS) $< -o $@
+
+selectGoodFeatures_cuda_cpu.o: selectGoodFeatures.c
 	$(CC) -c $(CFLAGS) $< -o $@
 
 # Libraries
@@ -128,6 +134,7 @@ example3_cpu.c: example3.c
 	@sed 's/#include.*cuda_runtime.h//g; s/trackFeatures_cuda/trackFeatures/g; s/convolve_cuda/convolve/g' $< > $@
 	@echo "Note: You may need to manually adjust example3_cpu.c for full CPU compatibility"
 
+
 # Help target
 help:
 	@echo "Available targets:"
@@ -137,4 +144,5 @@ help:
 	@echo "  both        - Build both versions if possible"
 	@echo "  run/run_gpu - Run GPU version"
 	@echo "  run_cpu     - Run CPU version"
+	@echo "  test_gpu_features - Test GPU feature selection"
 	@echo "  clean       - Clean all built files"
