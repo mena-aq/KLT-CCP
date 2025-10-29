@@ -125,8 +125,8 @@ static void initializePyramidMetadata(_KLT_Pyramid pyramid) {
     g_pyramid_meta_initialized = true;
     
     if (KLT_verbose) {
-        printf("Initialized shared pyramid metadata: %d levels, total size: %zu floats\n", 
-               nLevels, g_pyramid_meta.total_size);
+        //printf("Initialized shared pyramid metadata: %d levels, total size: %zu floats\n", 
+               //nLevels, g_pyramid_meta.total_size);
     }
 }
 
@@ -205,7 +205,7 @@ static cudaEvent_t tracking_done;
 
 static void allocatePinnedBuffers(int numFeatures) {
     if (pinned_pool_size < numFeatures) {
-        printf("Allocating pinned memory for %d features...\n", numFeatures);
+        //printf("Allocating pinned memory for %d features...\n", numFeatures);
         
         // Free existing if too small
         if (h_in_x_pinned) cudaFreeHost(h_in_x_pinned);
@@ -229,7 +229,7 @@ static void allocatePinnedBuffers(int numFeatures) {
 
 static void allocateFeatureList(int numFeatures) {
     if (feature_pool_size < numFeatures) {
-        printf("Allocating feature list...\n");
+        //printf("Allocating feature list...\n");
         // Free existing if too small
         if (d_in_x) cudaFree(d_in_x);
         if (d_in_y) cudaFree(d_in_y);
@@ -249,7 +249,7 @@ static void allocateFeatureList(int numFeatures) {
         feature_pool_size = numFeatures;
         
         if (KLT_verbose) {
-            printf("Allocated feature pool for %d features\n", numFeatures);
+            //printf("Allocated feature pool for %d features\n", numFeatures);
         }
     }
 }
@@ -269,8 +269,10 @@ static size_t estimatePyramidSize(_KLT_Pyramid pyramid) {
 
 static void allocatePyramidBuffers(_KLT_Pyramid pyramid) {
 
+    /*
     if (!d_pyramid1)
         printf("allocating pyramid buffers\n");
+    */
     
     // Initialize shared metadata first
     initializePyramidMetadata(pyramid);
@@ -301,7 +303,7 @@ static void allocatePyramidBuffers(_KLT_Pyramid pyramid) {
         constant_memory_initialized = true;
         
         if (KLT_verbose) {
-            printf("Copied pyramid metadata to constant memory\n");
+            //printf("Copied pyramid metadata to constant memory\n");
         }
     }
 }
@@ -309,7 +311,7 @@ static void allocatePyramidBuffers(_KLT_Pyramid pyramid) {
 __host__ void allocateGPUResources(int numFeatures, KLT_TrackingContext h_tc, int ncols, int nrows) {
 
     // if first frame allocate image buffers
-    printf("allocate image buffers");
+    //printf("allocate image buffers");
     CUDA_CHECK(cudaMalloc((void**)&d_img1, ncols * nrows * sizeof(float)));
     CUDA_CHECK(cudaMalloc((void**)&d_img2, ncols * nrows * sizeof(float)));
     CUDA_CHECK(cudaMalloc((void**)&d_img3, ncols * nrows * sizeof(float)));
@@ -1137,7 +1139,7 @@ __host__ void kltTrackFeaturesCUDA(
         CUDA_CHECK(cudaMemcpyAsync(d_in_val, h_in_val_pinned, sizeof(int) * numFeatures, cudaMemcpyHostToDevice,stream1));
         
     } else {
-        printf("Subsequent frame - copying outputs to inputs\n");
+        //printf("Subsequent frame - copying outputs to inputs\n");
 
         CUDA_CHECK(cudaEventSynchronize(tracking_done));
         /*

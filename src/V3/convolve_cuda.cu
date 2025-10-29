@@ -656,7 +656,7 @@ __host__ void computeSmoothedImageCUDA(
           gauss_width = gauss.width;
           gaussderiv_width = gaussderiv.width;
           sigma_last = sigma;
-          printf("Using precomputed kernels for sigma %f\n", sigma);
+          //printf("Using precomputed kernels for sigma %f\n", sigma);
       }
   }
 
@@ -692,7 +692,7 @@ __host__ void computeGradientsCUDA(
           gauss_width = gauss.width;
           gaussderiv_width = gaussderiv.width;
           sigma_last = sigma;
-          printf("Using precomputed kernels for sigma %f\n", sigma);
+          //printf("Using precomputed kernels for sigma %f\n", sigma);
       }
   }
 
@@ -785,7 +785,7 @@ __host__ void computeKernelsConstant(float sigma) {
     
     if (sigma_type != SIGMA_OTHER) {
         // This is one of our precomputed sigmas - no need to recompute!
-        printf("Sigma %f is precomputed, using constant memory\n", sigma);
+        //printf("Sigma %f is precomputed, using constant memory\n", sigma);
         
         // Just update the global widths for this sigma
         ConvolutionKernel gauss, gaussderiv;
@@ -797,7 +797,7 @@ __host__ void computeKernelsConstant(float sigma) {
     }
     
     // Only reach here for non-precomputed sigmas
-    printf("Computing kernels for non-precomputed sigma: %f\n", sigma);
+    //printf("Computing kernels for non-precomputed sigma: %f\n", sigma);
     
     ConvolutionKernel gauss, gaussderiv;
     _computeKernels(sigma, &gauss, &gaussderiv);
@@ -814,7 +814,7 @@ __host__ void computeKernelsConstant(float sigma) {
 }
 
 __host__ void initializePrecomputedKernels() {
-    printf("Precomputing kernels for common sigma values...\n");
+    //printf("Precomputing kernels for common sigma values...\n");
     
     // Precompute and upload the three main sigmas
     ConvolutionKernel gauss, gaussderiv;
@@ -823,19 +823,19 @@ __host__ void initializePrecomputedKernels() {
     _computeKernels(0.7f, &gauss, &gaussderiv);
     CUDA_CHECK(cudaMemcpyToSymbol(c_gauss_kernel_07, gauss.data, gauss.width * sizeof(float)));
     CUDA_CHECK(cudaMemcpyToSymbol(c_gaussderiv_kernel_07, gaussderiv.data, gaussderiv.width * sizeof(float)));
-    printf("Precomputed kernels for sigma 0.7 (widths: %d, %d)\n", gauss.width, gaussderiv.width);
+    //printf("Precomputed kernels for sigma 0.7 (widths: %d, %d)\n", gauss.width, gaussderiv.width);
     
     // Sigma 3.6
     _computeKernels(3.6f, &gauss, &gaussderiv);
     CUDA_CHECK(cudaMemcpyToSymbol(c_gauss_kernel_36, gauss.data, gauss.width * sizeof(float)));
     CUDA_CHECK(cudaMemcpyToSymbol(c_gaussderiv_kernel_36, gaussderiv.data, gaussderiv.width * sizeof(float)));
-    printf("Precomputed kernels for sigma 3.6 (widths: %d, %d)\n", gauss.width, gaussderiv.width);
+    //printf("Precomputed kernels for sigma 3.6 (widths: %d, %d)\n", gauss.width, gaussderiv.width);
     
     // Sigma 1.0
     _computeKernels(1.0f, &gauss, &gaussderiv);
     CUDA_CHECK(cudaMemcpyToSymbol(c_gauss_kernel_10, gauss.data, gauss.width * sizeof(float)));
     CUDA_CHECK(cudaMemcpyToSymbol(c_gaussderiv_kernel_10, gaussderiv.data, gaussderiv.width * sizeof(float)));
-    printf("Precomputed kernels for sigma 1.0 (widths: %d, %d)\n", gauss.width, gaussderiv.width);
+    //printf("Precomputed kernels for sigma 1.0 (widths: %d, %d)\n", gauss.width, gaussderiv.width);
     
-    printf("Precomputation complete.\n");
+   // printf("Precomputation complete.\n");
 }
