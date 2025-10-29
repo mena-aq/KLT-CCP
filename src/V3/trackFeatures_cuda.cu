@@ -982,12 +982,25 @@ __global__ void trackFeaturePerThreadKernel(
     // Initialize coordinates
     float xloc = d_in_x[featureIdx];
     float yloc = d_in_y[featureIdx];
-    
+
+
+    // DIVISION TAKES MORE CYCLES THAN MULTIPLICATION, TRY THIS
+    const float inv_window_elems = 1.0f / (window_width * window_height);  // For residue
+	
+   /*
     // Transform to coarsest resolution
     for (int r = nPyramidLevels - 1; r >= 0; r--) {
         xloc /= c_subsampling; 
         yloc /= c_subsampling;
     }
+   */
+
+    // DIVISION TAKES MORE CYCLES THAN MULTIPLICATION, TRY THIS
+    for (int r = nPyramidLevels - 1; r >= 0; r--) {
+        xloc *= inv_subsampling; yloc *= inv_subsampling;
+    }
+
+
     float x1 = xloc, y1 = yloc;
     float x2 = xloc, y2 = yloc;
     int status = KLT_TRACKED;
