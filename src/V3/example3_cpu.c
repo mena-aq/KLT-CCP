@@ -12,6 +12,7 @@ saved to a text file; each feature list is also written to a PPM file.
 #include <sys/stat.h>
 #include "pnmio.h"
 #include "klt.h"
+#include <time.h>
 
 
 // Function to count image files in dataset folder 
@@ -88,10 +89,18 @@ int main(int argc, char *argv[])
   sprintf(fnameout, "%s/feat0.ppm", output_folder);
   KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, fnameout);
 
+  clock_t t0, t1;
+  double elapsed_sec;
+  double totalTrackTime = 0.0;
+
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
     pgmReadFile(fnamein, img2, &ncols, &nrows);
+    t0 = clock();
     KLTTrackFeatures(tc, img1, img2, ncols, nrows, fl);
+    t1 = clock();
+    elapsed_sec = (double)(t1 - t0) / CLOCKS_PER_SEC;
+    totalTrackTime += elapsed_sec;
 #ifdef REPLACE
     KLTReplaceLostFeatures(tc, img2, ncols, nrows, fl);
 #endif
@@ -99,6 +108,10 @@ int main(int argc, char *argv[])
     sprintf(fnameout, "%s/feat%d.ppm", output_folder, i);
     KLTWriteFeatureListToPPM(fl, img2, ncols, nrows, fnameout);
   }
+
+  printf("Total CPU tracking time for %d frames: %.6f seconds\n", nFrames-1, totalTrackTime);
+  printf("Average per frame: %.6f seconds\n", totalTrackTime / (nFrames-1));
+
   KLTWriteFeatureTable(ft, "features.txt", "%5.1f");
   KLTWriteFeatureTable(ft, "features.ft", NULL);
 
