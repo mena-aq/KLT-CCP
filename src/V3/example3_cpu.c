@@ -1,3 +1,5 @@
+%%writefile example3_cpu.c
+
 /**********************************************************************
 Finds the 150 best features in an image and tracks them through the 
 next two images.  The sequential mode is set in order to speed
@@ -48,6 +50,7 @@ int main(int argc, char *argv[])
   unsigned char *img1, *img2;
   char fnamein[100], fnameout[100];
   char dataset_folder[200] = "../../data/dataset3"; // default folder
+  //char dataset_folder[200] = "/kaggle/input/cityscape/dataset2";
   char output_folder[200] = "output";
 
   KLT_TrackingContext tc;

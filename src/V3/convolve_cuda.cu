@@ -785,7 +785,7 @@ __host__ void computeKernelsConstant(float sigma) {
     
     if (sigma_type != SIGMA_OTHER) {
         // This is one of our precomputed sigmas - no need to recompute!
-        //printf("Sigma %f is precomputed, using constant memory\n", sigma);
+        printf("Sigma %f is precomputed, using constant memory\n", sigma);
         
         // Just update the global widths for this sigma
         ConvolutionKernel gauss, gaussderiv;
@@ -797,7 +797,7 @@ __host__ void computeKernelsConstant(float sigma) {
     }
     
     // Only reach here for non-precomputed sigmas
-    //printf("Computing kernels for non-precomputed sigma: %f\n", sigma);
+    printf("Computing kernels for non-precomputed sigma: %f\n", sigma);
     
     ConvolutionKernel gauss, gaussderiv;
     _computeKernels(sigma, &gauss, &gaussderiv);
@@ -837,5 +837,5 @@ __host__ void initializePrecomputedKernels() {
     CUDA_CHECK(cudaMemcpyToSymbol(c_gaussderiv_kernel_10, gaussderiv.data, gaussderiv.width * sizeof(float)));
     //printf("Precomputed kernels for sigma 1.0 (widths: %d, %d)\n", gauss.width, gaussderiv.width);
     
-   // printf("Precomputation complete.\n");
+    //printf("Precomputation complete.\n");
 }

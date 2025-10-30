@@ -60,7 +60,7 @@ int main(int argc, char *argv[])
   char fnamein[100], fnameout[100];
   char fnamein_next[100];
   char dataset_folder[200] = "../../data/dataset3"; // default folder
-  //char dataset_folder[200] = "/kaggle/input/dataset3/dataset3";
+  //char dataset_folder[200] = "/kaggle/input/cityscape/dataset2";
   char output_folder[200] = "output";
 
   KLT_PixelType* frame_buffers[3];
