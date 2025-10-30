@@ -103,7 +103,6 @@ int main(int argc, char *argv[])
   img2 = (unsigned char *) malloc(ncols*nrows*sizeof(unsigned char));
   img3 = (unsigned char *) malloc(ncols*nrows*sizeof(unsigned char));
 
-  t0 = clock();  
   KLTSelectGoodFeatures(tc, img1, ncols, nrows, fl);
   KLTStoreFeatureList(fl, ft, 0);
   sprintf(fnameout, "%s/feat0.ppm", output_folder);
