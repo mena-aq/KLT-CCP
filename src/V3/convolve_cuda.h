@@ -63,53 +63,6 @@ __global__ void convolveVertKernel(
     float sigma
 );
 
-/*
-__host__ void convolveImageHorizCUDAold(
-  _KLT_FloatImage imgin,
-  ConvolutionKernel kernel,
-  _KLT_FloatImage imgout,
-  int ncols,
-  int nrows,
-  int kwidth
-);
-
-__host__ void convolveImageVertCUDAold(
-  _KLT_FloatImage imgin,
-  ConvolutionKernel kernel,
-  _KLT_FloatImage imgout,
-  int ncols,
-  int nrows,
-  int kwidth
-);
-
-__host__ void convolveSeperateCUDAold(
-  _KLT_FloatImage imgin,
-  ConvolutionKernel horiz_kernel,
-  ConvolutionKernel vert_kernel,
-  _KLT_FloatImage imgout
-);
-
-__host__ void computeSmoothedImageCUDAold(
-	_KLT_FloatImage d_img,
-	float sigma,
-	_KLT_FloatImage d_smooth
-);
-
-__host__ void computePyramidCUDAold(
-	_KLT_FloatImage d_img,
-	_KLT_Pyramid d_pyramid,
-	float sigma
-);
-
-__host__ void computeGradientsCUDAold(
-  _KLT_FloatImage img,
-  float sigma,
-  _KLT_FloatImage gradx,
-  _KLT_FloatImage grady);
-*/
-
-// ------------------------------------------- v3.5 --------------------------------------
-
 __host__ __device__ SigmaType getSigmaType(float sigma);
 
 __device__ const float* getKernelPtr(KernelType kernel_type, SigmaType sigma_type);

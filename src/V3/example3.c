@@ -109,12 +109,6 @@ int main(int argc, char *argv[])
   sprintf(fnameout, "%s/feat0.ppm", output_folder);
   KLTWriteFeatureListToPPM(fl, img1, ncols, nrows, fnameout);
 
-  /*
-  if (!start_event) {
-    cudaEventCreate(&start_event);
-    cudaEventCreate(&stop_event);
-  }
-  */
 
   t0 = clock();
   allocateGPUResources(nFeatures, tc, ncols, nrows);
@@ -123,7 +117,6 @@ int main(int argc, char *argv[])
   alloc_time = elapsed_sec;
   //printf("allocateGPUResources time: %.6f seconds\n", elapsed_sec);
 
-  //cudaEventRecord(start_event, 0);
   double totalTrackTime = 0.0;
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
@@ -133,12 +126,11 @@ int main(int argc, char *argv[])
         sprintf(fnamein_next, "%s/img%d.pgm", dataset_folder, i+1);
         pgmReadFile(fnamein_next, img3, &ncols, &nrows);
     } else {
-        // Last frame - use dummy data or same as current frame
+        // Last frame - same as current frame
         memcpy(img3, img2, ncols * nrows * sizeof(KLT_PixelType));
-        // Or: pgmReadFile(fnamein, img3, &ncols, &nrows); // same as current
     }
 
-    pgmReadFile(fnamein_next, img3, &ncols, &nrows);
+    //pgmReadFile(fnamein_next, img3, &ncols, &nrows);
     // track the features from img1 to img2 using CUDA implementation
 
     t0 = clock();
@@ -155,13 +147,6 @@ int main(int argc, char *argv[])
     KLTWriteFeatureListToPPM(fl, img2, ncols, nrows, fnameout);
   }
 
-  //cudaEventRecord(stop_event, 0);
-  //cudaEventSynchronize(stop_event);
-  
-  //float total_ms = 0;
-  //cudaEventElapsedTime(&total_ms, start_event, stop_event);
-  //printf("GPU tracking time for %d frames: %f ms\n", nFrames-1, total_ms);
-  //printf("Average per frame: %f ms\n", total_ms / (nFrames-1));
 
   t0 = clock();
   freeGPUResources();
