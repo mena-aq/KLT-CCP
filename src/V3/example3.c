@@ -121,7 +121,7 @@ int main(int argc, char *argv[])
   t1 = clock();
   elapsed_sec = (double)(t1 - t0) / CLOCKS_PER_SEC;
   alloc_time = elapsed_sec;
-  printf("allocateGPUResources time: %.6f seconds\n", elapsed_sec);
+  //printf("allocateGPUResources time: %.6f seconds\n", elapsed_sec);
 
   //cudaEventRecord(start_event, 0);
   double totalTrackTime = 0.0;
@@ -168,7 +168,7 @@ int main(int argc, char *argv[])
   t1 = clock();
   elapsed_sec = (double)(t1 - t0) / CLOCKS_PER_SEC;
   free_time = elapsed_sec;
-  printf("freeGPUResources time: %.6f seconds\n", elapsed_sec);
+  //printf("freeGPUResources time: %.6f seconds\n", elapsed_sec);
 
   double totalGPUTime = alloc_time + free_time + totalTrackTime;
   printf("Total GPU time for %d frames: %.6f seconds\n", nFrames-1, totalGPUTime);

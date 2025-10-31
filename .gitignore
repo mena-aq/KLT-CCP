@@ -27,3 +27,6 @@ __pycache__/
 # Temporary files
 *.tmp
 *.temp
+
+#extra folders
+V3_history
