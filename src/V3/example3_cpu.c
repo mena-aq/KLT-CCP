@@ -1,5 +1,3 @@
-%%writefile example3_cpu.c
-
 /**********************************************************************
 Finds the 150 best features in an image and tracks them through the 
 next two images.  The sequential mode is set in order to speed
