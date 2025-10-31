@@ -60,7 +60,7 @@ int main(int argc, char *argv[])
   char fnamein[100], fnameout[100];
   char fnamein_next[100];
   char dataset_folder[200] = "../../data/dataset3"; // default folder
-  //char dataset_folder[200] = "/kaggle/input/cityscape/dataset2";
+  //char dataset_folder[200] = "/kaggle/input/valley-hd/valley";
   char output_folder[200] = "output";
 
   KLT_PixelType* frame_buffers[3];
@@ -76,9 +76,11 @@ int main(int argc, char *argv[])
   mkdir(output_folder, 0755);
 
   // check if dataset folder is provided as command-line argument
+/*
   if (argc > 1) {
     sprintf(dataset_folder, "../../data/%s", argv[1]);
   }
+*/
 
   // count the number of image files in the dataset folder
   nFrames = count_image_files(dataset_folder);

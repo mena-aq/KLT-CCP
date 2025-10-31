@@ -1,4 +1,3 @@
-
 #include "trackFeatures_cuda.h"
 #include "convolve_cuda.h"
 
@@ -90,6 +89,13 @@ static void verifyPyramidContents(const char* name, float* d_pyramid, int nLevel
         }
     }
     printf("=== End %s Pyramid Verification ===\n\n", name);
+}
+
+void printPinnedFeatures(float* x, float* y, int* val, int nFeatures) {
+    printf("Pinned features (%d total):\n", nFeatures);
+    for (int i = 0; i < nFeatures; i++) {
+        printf("  %d: (%6.1f, %6.1f) = %d\n", i, x[i], y[i], val[i]);
+    }
 }
 
 
@@ -343,7 +349,7 @@ __host__ void allocateGPUResources(int numFeatures, KLT_TrackingContext h_tc, in
     cudaStreamCreate(&stream1);
     cudaStreamCreate(&stream2);
     cudaEventCreate(&pyramid3_ready);
-    cudaEventCreate(&tracking_done);
+    //cudaEventCreate(&tracking_done);
 
     //computeKernelsConstant(_KLTComputeSmoothSigma(h_tc));
     initializePrecomputedKernels();
@@ -889,7 +895,19 @@ __global__ void trackFeatureKernelTest(
 			d_out_x[featureIdx] = final_x;
 			d_out_y[featureIdx] = final_y;
 			d_out_val[featureIdx] = KLT_TRACKED;
+            //printf("Feature %d x:%f y:%f\n",featureIdx,final_x,final_y);
 		}
+        /*
+        if (tid == 0) {
+            if (final_val != KLT_TRACKED) {
+                printf("Feature %d LOST: status=%d, pos=(%.1f,%.1f)->(%.1f,%.1f)\n", 
+                       featureIdx, final_val, d_in_x[featureIdx], d_in_y[featureIdx], final_x, final_y);
+            } else if (featureIdx < 5) {  // Print first few successful ones
+                printf("Feature %d TRACKED: (%.1f,%.1f)->(%.1f,%.1f)\n",
+                       featureIdx, d_in_x[featureIdx], d_in_y[featureIdx], final_x, final_y);
+            }
+        }
+        */
 	}
 	
 };
@@ -1114,15 +1132,22 @@ __host__ void kltTrackFeaturesCUDA(
     } else {
         //printf("Subsequent frame - copying outputs to inputs\n");
 
-        CUDA_CHECK(cudaEventSynchronize(tracking_done));
+        //CUDA_CHECK(cudaEventSynchronize(tracking_done));
         /*
         std::swap(d_in_x, d_out_x);
         std::swap(d_in_y, d_out_y);
         std::swap(d_in_val, d_out_val);
         */
+        /*
         CUDA_CHECK(cudaMemcpyAsync(d_in_x, d_out_x, sizeof(float) * numFeatures, cudaMemcpyDeviceToDevice,stream1));
         CUDA_CHECK(cudaMemcpyAsync(d_in_y, d_out_y, sizeof(float) * numFeatures, cudaMemcpyDeviceToDevice,stream1));
         CUDA_CHECK(cudaMemcpyAsync(d_in_val, d_out_val, sizeof(int) * numFeatures, cudaMemcpyDeviceToDevice,stream1)); 
+        */
+
+        // updated to imrpove tracking
+        CUDA_CHECK(cudaMemcpyAsync(d_in_x, h_out_x_pinned, sizeof(float) * numFeatures, cudaMemcpyHostToDevice, stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_y, h_out_y_pinned, sizeof(float) * numFeatures, cudaMemcpyHostToDevice, stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_val, h_out_val_pinned, sizeof(int) * numFeatures, cudaMemcpyHostToDevice, stream1));
     }
 
    
@@ -1140,7 +1165,7 @@ __host__ void kltTrackFeaturesCUDA(
     printf("======================================\n");
     */
 
-	trackFeatureKernel<<<gridSize, blockSize,sharedMemSize,stream1>>>(
+	trackFeatureKernelTest<<<gridSize, blockSize,sharedMemSize,stream1>>>(
 		d_pyramid1,
 		d_pyramid1_gradx,
 		d_pyramid1_grady,
@@ -1169,12 +1194,16 @@ __host__ void kltTrackFeaturesCUDA(
     }
 	// synchronize
 	//cudaDeviceSynchronize();
-    CUDA_CHECK(cudaEventRecord(tracking_done, stream1));
-    //CUDA_CHECK(cudaStreamSynchronize(stream1));
+    //CUDA_CHECK(cudaEventRecord(tracking_done, stream1));
+    CUDA_CHECK(cudaStreamSynchronize(stream1));
 
     CUDA_CHECK(cudaMemcpyAsync(h_out_x_pinned, d_out_x, sizeof(float) * numFeatures, cudaMemcpyDeviceToHost,stream1));
     CUDA_CHECK(cudaMemcpyAsync(h_out_y_pinned, d_out_y, sizeof(float) * numFeatures, cudaMemcpyDeviceToHost,stream1));
     CUDA_CHECK(cudaMemcpyAsync(h_out_val_pinned, d_out_val, sizeof(int) * numFeatures, cudaMemcpyDeviceToHost,stream1));
+
+    CUDA_CHECK(cudaStreamSynchronize(stream1));
+
+    //printPinnedFeatures(h_out_x_pinned, h_out_y_pinned, h_out_val_pinned, numFeatures);
 
     // Copy to feature list (fast CPU copy)
     for (i = 0; i < numFeatures; ++i) {
