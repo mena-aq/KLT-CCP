@@ -37,57 +37,6 @@ static void checkCuda(cudaError_t err, const char *msg)
   }
 }
 
-/* Horizontal 1D convolution kernel (reads from imgin, writes to imgout) */
-__global__ void convolveHorizKernelold(const float *imgin, float *imgout,
-                                    int ncols, int nrows,
-                                    const float *kernel, int kwidth)
-{
-  int x = blockIdx.x * blockDim.x + threadIdx.x;
-  int y = blockIdx.y * blockDim.y + threadIdx.y;
-  if (x >= ncols || y >= nrows) return;
-
-  int radius = kwidth / 2;
-
-  /* Zero border */
-  if (x < radius || x >= ncols - radius) {
-    imgout[y * ncols + x] = 0.0f;
-    return;
-  }
-
-  float sum = 0.0f;
-  int start = x - radius;
-  for (int k = 0; k < kwidth; k++) {
-    /* kernel indexed reversed to match original CPU implementation */
-    sum += imgin[y * ncols + (start + k)] * kernel[kwidth - 1 - k];
-  }
-  imgout[y * ncols + x] = sum;
-}
-
-/* Vertical 1D convolution kernel (reads from imgin, writes to imgout) */
-__global__ void convolveVertKernelold(const float *imgin, float *imgout,
-                                    int ncols, int nrows,
-                                    const float *kernel, int kwidth)
-{
-  int x = blockIdx.x * blockDim.x + threadIdx.x;
-  int y = blockIdx.y * blockDim.y + threadIdx.y;
-  if (x >= ncols || y >= nrows) return;
-
-  int radius = kwidth / 2;
-
-  /* Zero border */
-  if (y < radius || y >= nrows - radius) {
-    imgout[y * ncols + x] = 0.0f;
-    return;
-  }
-
-  float sum = 0.0f;
-  int start = y - radius;
-  for (int k = 0; k < kwidth; k++) {
-    sum += imgin[(start + k) * ncols + x] * kernel[kwidth - 1 - k];
-  }
-  imgout[y * ncols + x] = sum;
-}
-
 // ------------------------------------------- v3.5 --------------------------------------
 
 
@@ -407,53 +356,42 @@ __global__ void convolveHorizKernel(
 {
     extern __shared__ float s_data[];
 
-     SigmaType sigma_type;
+    SigmaType sigma_type;
     if (fabsf(sigma - 0.7f) < 0.05f) sigma_type = SIGMA_07;
     else if (fabsf(sigma - 3.6f) < 0.05f) sigma_type = SIGMA_36;
     else if (fabsf(sigma - 1.0f) < 0.05f) sigma_type = SIGMA_10;
-    else sigma_type = SIGMA_10;  // Fallback
-    const float *kernel = getKernelPtr(kernel_type,sigma_type);
-    int radius = kwidth / 2;
-    
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    
-    // Calculate shared memory dimensions (block + halo regions)
-    int shared_width = blockDim.x + 2 * radius;
-    int shared_idx = threadIdx.y * shared_width + threadIdx.x;
-    
-    // Load main data to shared memory
-    if (x < ncols && y < nrows) {
-        s_data[shared_idx + radius] = imgin[y * ncols + x];
+    else sigma_type = SIGMA_10;  // fallback
+
+    const float *kernel = getKernelPtr(kernel_type, sigma_type);
+    const int radius = kwidth / 2;
+
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    const int shared_width = blockDim.x + 2 * radius;
+    const int shared_idx = threadIdx.y * shared_width + threadIdx.x;
+
+    // --- load full row tile into shared memory (row-major) ---
+    for (int dx = threadIdx.x; dx < shared_width; dx += blockDim.x) {
+        int gx = blockIdx.x * blockDim.x + dx - radius;
+        gx = max(0, min(gx, ncols - 1));
+        if (y < nrows)
+            s_data[threadIdx.y * shared_width + dx] = imgin[y * ncols + gx];
+        else
+            s_data[threadIdx.y * shared_width + dx] = 0.0f;
     }
-    
-    // Load left halo
-    if (threadIdx.x < radius && x >= radius) {
-        int left_x = x - radius;
-        s_data[shared_idx] = imgin[y * ncols + left_x];
-    }
-    
-    // Load right halo  
-    if (threadIdx.x >= blockDim.x - radius && x < ncols - radius) {
-        int right_x = x + radius;
-        s_data[shared_idx + 2 * radius] = imgin[y * ncols + right_x];
-    }
-    
+
     __syncthreads();
-    
+
     if (x >= ncols || y >= nrows) return;
-    
-    // Zero border handling
-    if (x < radius || x >= ncols - radius) {
-        imgout[y * ncols + x] = 0.0f;
-        return;
-    }
-    
-    // Convolve from shared memory
+
+    // --- convolve horizontally (same as CPU version) ---
     float sum = 0.0f;
-    for (int k = 0; k < kwidth; k++) {
-        sum += s_data[shared_idx + k] * kernel[kwidth - 1 - k];
+    const int base = threadIdx.y * shared_width + (threadIdx.x + radius);
+    for (int k = 0; k < kwidth; ++k) {
+        sum += s_data[base - radius + k] * kernel[kwidth - 1 - k];
     }
+
     imgout[y * ncols + x] = sum;
 }
 
@@ -462,60 +400,49 @@ __global__ void convolveVertKernel(
     int ncols, int nrows,
     int kwidth,
     KernelType kernel_type,
-    float sigma
-)
+    float sigma)
 {
     extern __shared__ float s_data[];
 
-     SigmaType sigma_type;
+    SigmaType sigma_type;
     if (fabsf(sigma - 0.7f) < 0.05f) sigma_type = SIGMA_07;
     else if (fabsf(sigma - 3.6f) < 0.05f) sigma_type = SIGMA_36;
     else if (fabsf(sigma - 1.0f) < 0.05f) sigma_type = SIGMA_10;
-    else sigma_type = SIGMA_10;  // Fallback
-    const float *kernel = getKernelPtr(kernel_type,sigma_type);
-    int radius = kwidth / 2;
-    
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    
-    // Calculate shared memory dimensions
-    int shared_height = blockDim.y + 2 * radius;
-    int shared_idx = threadIdx.x * shared_height + threadIdx.y;
-    
-    // Load main data to shared memory
-    if (x < ncols && y < nrows) {
-        s_data[shared_idx + radius] = imgin[y * ncols + x];
+    else sigma_type = SIGMA_10;
+
+    const float *kernel = getKernelPtr(kernel_type, sigma_type);
+    const int radius = kwidth / 2;
+
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    const int shared_height = blockDim.y + 2 * radius;
+    const int TILE_W = blockDim.x;
+
+    // --- load full column tile into shared memory (row-major) ---
+    for (int dy = threadIdx.y; dy < shared_height; dy += blockDim.y) {
+        int gy = blockIdx.y * blockDim.y + dy - radius;
+        gy = max(0, min(gy, nrows - 1));
+        if (x < ncols)
+            s_data[dy * TILE_W + threadIdx.x] = imgin[gy * ncols + x];
+        else
+            s_data[dy * TILE_W + threadIdx.x] = 0.0f;
     }
-    
-    // Load top halo
-    if (threadIdx.y < radius && y >= radius) {
-        int top_y = y - radius;
-        s_data[shared_idx] = imgin[top_y * ncols + x];
-    }
-    
-    // Load bottom halo
-    if (threadIdx.y >= blockDim.y - radius && y < nrows - radius) {
-        int bottom_y = y + radius;
-        s_data[shared_idx + 2 * radius] = imgin[bottom_y * ncols + x];
-    }
-    
+
     __syncthreads();
-    
+
     if (x >= ncols || y >= nrows) return;
-    
-    // Zero border handling
-    if (y < radius || y >= nrows - radius) {
-        imgout[y * ncols + x] = 0.0f;
-        return;
-    }
-    
-    // Convolve from shared memory
+
+    // --- convolve vertically (same as CPU version) ---
     float sum = 0.0f;
-    for (int k = 0; k < kwidth; k++) {
-        sum += s_data[shared_idx + k] * kernel[kwidth - 1 - k];
+    const int base = (threadIdx.y + radius) * TILE_W + threadIdx.x;
+    for (int k = 0; k < kwidth; ++k) {
+        sum += s_data[base - radius * TILE_W + k * TILE_W] * kernel[kwidth - 1 - k];
     }
+
     imgout[y * ncols + x] = sum;
 }
+
 
 __host__ void convolveImageHorizCUDA(
   float *d_imgin,
