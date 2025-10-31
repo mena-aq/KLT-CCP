@@ -90,6 +90,7 @@ int main(int argc, char *argv[])
 
   clock_t t0, t1;
   double elapsed_sec;
+  double alloc_time,free_time;
 
   tc = KLTCreateTrackingContext();
   fl = KLTCreateFeatureList(nFeatures);
@@ -119,6 +120,7 @@ int main(int argc, char *argv[])
   allocateGPUResources(nFeatures, tc, ncols, nrows);
   t1 = clock();
   elapsed_sec = (double)(t1 - t0) / CLOCKS_PER_SEC;
+  alloc_time = elapsed_sec;
   printf("allocateGPUResources time: %.6f seconds\n", elapsed_sec);
 
   //cudaEventRecord(start_event, 0);
@@ -135,8 +137,8 @@ int main(int argc, char *argv[])
         memcpy(img3, img2, ncols * nrows * sizeof(KLT_PixelType));
         // Or: pgmReadFile(fnamein, img3, &ncols, &nrows); // same as current
     }
-    
-    pgmReadFile(fnamein_next,img3,&ncols,&nrows);
+
+    pgmReadFile(fnamein_next, img3, &ncols, &nrows);
     // track the features from img1 to img2 using CUDA implementation
 
     t0 = clock();
@@ -153,9 +155,6 @@ int main(int argc, char *argv[])
     KLTWriteFeatureListToPPM(fl, img2, ncols, nrows, fnameout);
   }
 
-  printf("Total GPU tracking time for %d frames: %.6f seconds\n", nFrames-1, totalTrackTime);
-  printf("Average per frame: %.6f seconds\n", totalTrackTime / (nFrames-1));
-
   //cudaEventRecord(stop_event, 0);
   //cudaEventSynchronize(stop_event);
   
@@ -168,7 +167,13 @@ int main(int argc, char *argv[])
   freeGPUResources();
   t1 = clock();
   elapsed_sec = (double)(t1 - t0) / CLOCKS_PER_SEC;
+  free_time = elapsed_sec;
   printf("freeGPUResources time: %.6f seconds\n", elapsed_sec);
+
+  double totalGPUTime = alloc_time + free_time + totalTrackTime;
+  printf("Total GPU time for %d frames: %.6f seconds\n", nFrames-1, totalGPUTime);
+  printf("Average per frame: %.6f seconds\n", totalTrackTime / (nFrames-1));
+
 
   KLTWriteFeatureTable(ft, "features.txt", "%5.1f");
   KLTWriteFeatureTable(ft, "features.ft", NULL);
