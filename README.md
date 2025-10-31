@@ -60,4 +60,5 @@ make run_gpu DATASET=dataset1|dataset2|dataset3
 ```
 make profile_gpu DATASET=dataset1|dataset2|dataset3 
 ```
-#### Dataset used: [valley](https://www.kaggle.com/datasets/hiyamrehan/valley-hd)
+#### Dataset used: [valley](https://www.kaggle.com/datasets/hiyamrehan/valley-hd) on kaggle/hiyam-rehan
+
