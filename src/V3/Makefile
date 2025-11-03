@@ -110,7 +110,7 @@ run:
 	
 
 profile_gpu:
-	nsys profile --stats=true ./example3_gpu $(DATASET) > analysis.txt
+	nsys profile --stats=true ./example3_gpu $(DATASET) > profile.txt
 	
 profile_cpu:
 	gprof ./example3_cpu > profile.txt
@@ -119,7 +119,7 @@ profile_cpu:
 
 clean:
 	rm -f *.o *.a example3_cpu example3_gpu *.tar *.tar.gz libklt*.a \
-	      feat*.ppm features.ft features.txt gmon.out profile.txt callgraph.png
+	      feat*.ppm features.ft features.txt gmon.out profile.txt callgraph.png 
 	rm -rf output
 
 # Create CPU-compatible example file from the original

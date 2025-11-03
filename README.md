@@ -29,7 +29,7 @@ make run DATASET=dataset1|dataset2|dataset3
 make clean
 ```
 
-## Running V2
+## Running V2 / V3
 
 ### CPU:
 
@@ -60,7 +60,5 @@ make run_gpu DATASET=dataset1|dataset2|dataset3
 ```
 make profile_gpu DATASET=dataset1|dataset2|dataset3 
 ```
-#### HD Dataset used
-```
-[valley](https://www.kaggle.com/datasets/hiyamrehan/valley-hd)
-```
+## HD Dataset Used
+To access our HD dataset, visit: [valley](https://www.kaggle.com/datasets/hiyamrehan/valley-hd) on kaggle/hiyam-rehan

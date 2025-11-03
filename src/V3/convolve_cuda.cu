@@ -37,8 +37,6 @@ static void checkCuda(cudaError_t err, const char *msg)
   }
 }
 
-// ------------------------------------------- v3.5 --------------------------------------
-
 
 /* CPU: convert pixel values to float image */
 void _KLTToFloatImage(
@@ -323,7 +321,6 @@ void _KLTComputeSmoothedImage(
 }
 
 
-// ------------------------------------------- v3.6 --------------------------------------
 
 // Helper function to determine which sigma we're using
 __host__ __device__ SigmaType getSigmaType(float sigma) {
@@ -458,12 +455,6 @@ __host__ void convolveImageHorizCUDA(
   //assert(h_kernel.width % 2 == 1);
   assert(d_imgin != d_imgout);
 
-  // Allocate and copy device kernel
-  //float *d_kernel = NULL;
-  //size_t kernel_bytes = (size_t)kwidth * sizeof(float);
-  //CUDA_CHECK(cudaMalloc((void**)&d_kernel, kernel_bytes));
-  //CUDA_CHECK(cudaMemcpyAsync(d_kernel, h_kernel.data, kernel_bytes, cudaMemcpyHostToDevice,stream));
-
   // Launch configuration
   dim3 blockSize(16, 16);  // You can tune this (32x8, 16x16, 32x4)
   dim3 gridSize((ncols + blockSize.x - 1)/blockSize.x, 
@@ -481,8 +472,6 @@ __host__ void convolveImageHorizCUDA(
   CUDA_CHECK(cudaGetLastError());
   //CUDA_CHECK(cudaDeviceSynchronize());
 
-  // Free device memory
-  //cudaFree(d_kernel);
 }
 
 __host__ void convolveImageVertCUDA(
@@ -498,12 +487,6 @@ __host__ void convolveImageVertCUDA(
 {
   //assert(h_kernel.width % 2 == 1);
   assert(d_imgin != d_imgout);
-
-  // Allocate and copy device kernel
-  //float *d_kernel = NULL;
-  //size_t kernel_bytes = (size_t)kwidth * sizeof(float);
-  //CUDA_CHECK(cudaMalloc((void**)&d_kernel, kernel_bytes));
-  //CUDA_CHECK(cudaMemcpyAsync(d_kernel, h_kernel.data, kernel_bytes, cudaMemcpyHostToDevice,stream));
 
   // Launch configuration
   dim3 blockSize(16, 16);
@@ -522,8 +505,6 @@ __host__ void convolveImageVertCUDA(
   CUDA_CHECK(cudaGetLastError());
   //CUDA_CHECK(cudaDeviceSynchronize());
 
-  // Free device memory
-  //cudaFree(d_kernel);
 }
 
 __host__ void convolveSeparateCUDA(
@@ -565,12 +546,6 @@ __host__ void computeSmoothedImageCUDA(
 {
   assert(d_smooth_img != NULL);
 
-  /* Compute kernel, if necessary; gauss_deriv is not used */
-  /*
-  if (fabsf(sigma - sigma_last) > 0.05f)
-    _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
-  */
-
   SigmaType sigma_type = getSigmaType(sigma);
   if (fabsf(sigma - sigma_last) > 0.05f) {
       if (sigma_type == SIGMA_OTHER) {
@@ -601,11 +576,6 @@ __host__ void computeGradientsCUDA(
   cudaStream_t stream
 )
 {
-  /* Compute kernels, if necessary */
-  /*
-  if (fabsf(sigma - sigma_last) > 0.05f)
-    _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
-  */
   
   SigmaType sigma_type = getSigmaType(sigma);
   if (fabsf(sigma - sigma_last) > 0.05f) {
