@@ -4,6 +4,8 @@
 // for debugging
 #include <float.h>
 
+# define TOTAL_FEATURES 150
+
 // cuda check macro for error handling
 #define CUDA_CHECK(call)                                                    \
 do {                                                                        \
@@ -430,263 +432,6 @@ __device__ float interpolateCUDA(float x, float y, const float *img_data, int le
              ax   *   ay   * ptr[nc+1] );
 }
 
- __global__ void trackFeatureKernel(
-    const float *d_pyramid1,
-    const float *d_pyramid1_gradx,
-    const float *d_pyramid1_grady,
-    const float *d_pyramid2,
-    const float *d_pyramid2_gradx,
-    const float *d_pyramid2_grady,
-    const float *d_in_x,
-    const float *d_in_y,
-    const int *d_in_val,
-    float *d_out_x,
-    float *d_out_y,
-    int *d_out_val,
-    int borderx,
-    int bordery,
-    int window_width,
-    int window_height,
-    float step_factor,
-    int max_iterations,
-    float small,
-    float th,
-    float max_residue
-)
-{
-    const float one_plus_eps = 1.001f;
-
-    int featureIdx = blockIdx.x;
-    int tid = threadIdx.y * blockDim.x + threadIdx.x;
-    int total_threads = blockDim.x * blockDim.y;
-    
-    // Only track features that are not lost
-    if (d_in_val[featureIdx] < 0) {
-        if (tid == 0) {
-            d_out_x[featureIdx] = -1.0f;
-            d_out_y[featureIdx] = -1.0f;
-            d_out_val[featureIdx] = d_in_val[featureIdx];
-        }
-        return;
-    }
-
-    int hw = window_width / 2;
-    int hh = window_height / 2;
-	int window_elems = window_width * window_height;
-
-    // Bounds check: skip threads outside the window
-    if (tid >= window_elems) return;
-
-    int nPyramidLevels = c_nLevels;
-    
-    // Shared variables for feature state 
-    __shared__ float s_x1, s_y1, s_x2, s_y2;
-    __shared__ float s_dx, s_dy;
-    __shared__ int s_status, s_continue;
-    __shared__ int s_iteration;
-    
-    // Shared reduction variables
-    __shared__ float s_gxx, s_gxy, s_gyy, s_ex, s_ey;
-
-    if (tid == 0) {
-        // Initialize coordinates
-        float xloc = d_in_x[featureIdx];
-        float yloc = d_in_y[featureIdx];
-        
-        // Transform to coarsest resolution
-        for (int r = nPyramidLevels - 1; r >= 0; r--) {
-            xloc /= c_subsampling; yloc /= c_subsampling;
-        }
-        s_x1 = xloc; s_y1 = yloc;
-        s_x2 = xloc; s_y2 = yloc;
-        s_status = KLT_TRACKED;
-    }
-    __syncthreads();
-
-    // Main pyramid levels loop
-    for (int r = nPyramidLevels - 1; r >= 0; r--) {
-        if (s_status != KLT_TRACKED) break;
-        
-        if (tid == 0) {
-            s_x1 *= c_subsampling; s_y1 *= c_subsampling;
-            s_x2 *= c_subsampling; s_y2 *= c_subsampling;
-        }
-        __syncthreads();
-
-        // Iterative refinement for this pyramid level
-        s_iteration = 0;
-        s_continue = 1;
-        
-        do {
-
-            // Add boundary check at start of each iteration (like CPU)
-            if (tid == 0) {
-                int nc = c_ncols[r];
-                int nr = c_nrows[r];
-                
-                // Exact CPU boundary check logic
-                if (s_x1 - hw < 0.0f || nc - (s_x1 + hw) < one_plus_eps ||
-                    s_x2 - hw < 0.0f || nc - (s_x2 + hw) < one_plus_eps ||
-                    s_y1 - hh < 0.0f || nr - (s_y1 + hh) < one_plus_eps ||
-                    s_y2 - hh < 0.0f || nr - (s_y2 + hh) < one_plus_eps) {
-                    s_status = KLT_OOB;
-                    s_continue = 0;
-                }
-            }
-            __syncthreads();
-            
-            if (s_status != KLT_TRACKED) break;
-
-
-            // Each thread computes its portion of the window
-            int i = threadIdx.x - hw;
-            int j = threadIdx.y - hh;
-            
-            float samp_x1 = s_x1 + (float)i;
-            float samp_y1 = s_y1 + (float)j;
-            float samp_x2 = s_x2 + (float)i;
-            float samp_y2 = s_y2 + (float)j;
-
-            // Compute this thread's contribution
-            float imgdiff = interpolateCUDA(samp_x1, samp_y1, d_pyramid1, r) - 
-                           interpolateCUDA(samp_x2, samp_y2, d_pyramid2, r);
-            
-            float gx = interpolateCUDA(samp_x1, samp_y1, d_pyramid1_gradx, r) + 
-                      interpolateCUDA(samp_x2, samp_y2, d_pyramid2_gradx, r);
-         
-            float gy = interpolateCUDA(samp_x1, samp_y1, d_pyramid1_grady, r) + 
-                      interpolateCUDA(samp_x2, samp_y2, d_pyramid2_grady, r);
-
-
-            // Each thread computes its partial sums
-            float my_gxx = gx * gx;
-            float my_gxy = gx * gy;
-            float my_gyy = gy * gy;
-            float my_ex = imgdiff * gx;
-            float my_ey = imgdiff * gy;
-
-            // Parallel reduction across threads
-            if (tid == 0) {
-                s_gxx = 0.0f; s_gxy = 0.0f; s_gyy = 0.0f; 
-                s_ex = 0.0f; s_ey = 0.0f;
-            }
-            __syncthreads();
-
-            // atomic add all thread contributions
-            atomicAdd(&s_gxx, my_gxx);
-            atomicAdd(&s_gxy, my_gxy);
-            atomicAdd(&s_gyy, my_gyy);
-            atomicAdd(&s_ex, my_ex);
-            atomicAdd(&s_ey, my_ey);
-            __syncthreads();
-
-            // thread 0 computes the displacement update
-            if (tid == 0) {
-                s_ex *= step_factor;
-                s_ey *= step_factor;
-                
-                float det = s_gxx * s_gyy - s_gxy * s_gxy;
-                s_dx = 0.0f; s_dy = 0.0f;
-                
-                if (det < small) {
-                    s_status = KLT_SMALL_DET;
-                    s_continue = 0;
-                } else {
-                    s_dx = (s_gyy * s_ex - s_gxy * s_ey) / det;
-                    s_dy = (s_gxx * s_ey - s_gxy * s_ex) / det;
-                    s_x2 += s_dx;
-                    s_y2 += s_dy;
-                    s_continue = (fabsf(s_dx) >= th || fabsf(s_dy) >= th) ? 1 : 0;
-                }
-                s_iteration++;
-            }
-            __syncthreads();
-
-        } while (s_continue && s_iteration < max_iterations && s_status == KLT_TRACKED);
-
-        // check residue
-        if (s_status == KLT_TRACKED) {
-            __shared__ float s_residue_sum;
-            if (tid == 0) s_residue_sum = 0.0f;
-            __syncthreads();
-
-            // Each thread computes its pixel's contribution to residue
-            int i = threadIdx.x - hw;
-            int j = threadIdx.y - hh;
-            float samp_x1 = s_x1 + (float)i;
-            float samp_y1 = s_y1 + (float)j;
-            float samp_x2 = s_x2 + (float)i;
-            float samp_y2 = s_y2 + (float)j;
-            
-            float residue_val = fabsf(interpolateCUDA(samp_x1, samp_y1, d_pyramid1, r) - 
-                                     interpolateCUDA(samp_x2, samp_y2, d_pyramid2, r));
-            
-            atomicAdd(&s_residue_sum, residue_val);
-            __syncthreads();
-
-			// thread 0 checks average residue
-            if (tid == 0) {
-                float residue = s_residue_sum / (window_width * window_height);
-
-                /*
-                // DEBUG: Always print residue for features that get lost
-                if (residue > max_residue) {
-                    printf("Feature %d LARGE_RESIDUE: pos=(%.1f,%.1f), residue=%.6f > threshold=%.6f\n", 
-                           featureIdx, s_x2, s_y2, residue, max_residue);
-                } else if (featureIdx < 5) { // Print a few successful ones for comparison
-                    printf("Feature %d TRACKED: pos=(%.1f,%.1f), residue=%.6f\n", 
-                           featureIdx, s_x2, s_y2, residue);
-                }
-                */
-                                                                           
-                if (residue > max_residue) s_status = KLT_LARGE_RESIDUE;
-            }
-            __syncthreads();
-        }
-    }
-
-    // record final value and status of the feature
-    if (tid == 0) {
-        float final_x = s_x2;
-        float final_y = s_y2;
-        int final_val = s_status;
-
-        // bounds check
-        int nc = c_ncols[0];
-        int nr = c_nrows[0];
-
-        if (final_x - hw < borderx || final_x + hw >= nc - borderx ||
-            final_y - hh < bordery || final_y + hh >= nr - bordery) {
-            final_val = KLT_OOB;
-        }
-        
-
-        if (final_val != KLT_TRACKED) {
-            d_out_x[featureIdx] = -1.0f;
-            d_out_y[featureIdx] = -1.0f;
-            d_out_val[featureIdx] = final_val;
-        } else {
-            d_out_x[featureIdx] = final_x;
-            d_out_y[featureIdx] = final_y;
-            d_out_val[featureIdx] = KLT_TRACKED;
-        }
-
-      // In trackFeatureKernel, before the final write:
-        /*
-        if (tid == 0) {
-            if (final_val != KLT_TRACKED) {
-                printf("Feature %d LOST: status=%d, pos=(%.1f,%.1f)->(%.1f,%.1f)\n", 
-                       featureIdx, final_val, d_in_x[featureIdx], d_in_y[featureIdx], final_x, final_y);
-            } else if (featureIdx < 5) {  // Print first few successful ones
-                printf("Feature %d TRACKED: (%.1f,%.1f)->(%.1f,%.1f)\n",
-                       featureIdx, d_in_x[featureIdx], d_in_y[featureIdx], final_x, final_y);
-            }
-        }
-        */
-
-    }
-}
-
 __global__ void trackFeatureKernelTest(
 	const float *d_pyramid1,
 	const float *d_pyramid1_gradx,
@@ -898,12 +643,6 @@ __global__ void trackFeatureKernelTest(
 			d_out_val[featureIdx] = KLT_TRACKED;
             //printf("Feature %d x:%f y:%f\n",featureIdx,final_x,final_y);
 		}
-
-        printf(
-        "Feature %3d | Init:(%.1f, %.1f) -> Final:(%.1f, %.1f) | Status: %d | Iter: %d\n",
-        featureIdx, d_in_x[featureIdx], d_in_y[featureIdx],
-        d_out_x[featureIdx], d_out_y[featureIdx], d_out_val[featureIdx], s_iteration
-    );
         /*
         if (tid == 0) {
             if (final_val != KLT_TRACKED) {
@@ -1119,7 +858,7 @@ __host__ void kltTrackFeaturesCUDA(
     int bordery = h_tc->bordery;
 
     // Copy data to pinned memory (fast CPU copy)
-    for (i = 0; i < 150; ++i) {
+    for (i = 0; i < TOTAL_FEATURES; ++i) {
         h_in_x_pinned[i] = h_fl->feature[i]->x;
         h_in_y_pinned[i] = h_fl->feature[i]->y; 
         h_in_val_pinned[i] = h_fl->feature[i]->val;
@@ -1132,9 +871,9 @@ __host__ void kltTrackFeaturesCUDA(
         //printf("First frame - initializing device feature buffers\n");
          
         // Copy to device (fast pinned→device)
-        CUDA_CHECK(cudaMemcpyAsync(d_in_x, h_in_x_pinned, sizeof(float) * 150, cudaMemcpyHostToDevice,stream1));
-        CUDA_CHECK(cudaMemcpyAsync(d_in_y, h_in_y_pinned, sizeof(float) * 150, cudaMemcpyHostToDevice,stream1));
-        CUDA_CHECK(cudaMemcpyAsync(d_in_val, h_in_val_pinned, sizeof(int) * 150, cudaMemcpyHostToDevice,stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_x, h_in_x_pinned, sizeof(float) * TOTAL_FEATURES, cudaMemcpyHostToDevice,stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_y, h_in_y_pinned, sizeof(float) * TOTAL_FEATURES, cudaMemcpyHostToDevice,stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_val, h_in_val_pinned, sizeof(int) * TOTAL_FEATURES, cudaMemcpyHostToDevice,stream1));
         
     } else {
         //printf("Subsequent frame - copying outputs to inputs\n");
@@ -1152,15 +891,15 @@ __host__ void kltTrackFeaturesCUDA(
         */
 
         // updated to imrpove tracking
-        CUDA_CHECK(cudaMemcpyAsync(d_in_x, h_out_x_pinned, sizeof(float) * 150, cudaMemcpyHostToDevice, stream1));
-        CUDA_CHECK(cudaMemcpyAsync(d_in_y, h_out_y_pinned, sizeof(float) * 150, cudaMemcpyHostToDevice, stream1));
-        CUDA_CHECK(cudaMemcpyAsync(d_in_val, h_out_val_pinned, sizeof(int) * 150, cudaMemcpyHostToDevice, stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_x, h_out_x_pinned, sizeof(float) * TOTAL_FEATURES, cudaMemcpyHostToDevice, stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_y, h_out_y_pinned, sizeof(float) * TOTAL_FEATURES, cudaMemcpyHostToDevice, stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_val, h_out_val_pinned, sizeof(int) * TOTAL_FEATURES, cudaMemcpyHostToDevice, stream1));
     }
 
    
     // V3.3: update launch configuration occupancy (windowsize=blocksize)
 	dim3 blockSize(window_width,window_height);
-    dim3 gridSize(150);
+    dim3 gridSize(TOTAL_FEATURES);
     size_t sharedMemSize = window_width * window_height * sizeof(float) * 3;
 
     /*
@@ -1204,16 +943,16 @@ __host__ void kltTrackFeaturesCUDA(
     //CUDA_CHECK(cudaEventRecord(tracking_done, stream1));
     CUDA_CHECK(cudaStreamSynchronize(stream1));
 
-    CUDA_CHECK(cudaMemcpyAsync(h_out_x_pinned, d_out_x, sizeof(float) * 150, cudaMemcpyDeviceToHost,stream1));
-    CUDA_CHECK(cudaMemcpyAsync(h_out_y_pinned, d_out_y, sizeof(float) * 150, cudaMemcpyDeviceToHost,stream1));
-    CUDA_CHECK(cudaMemcpyAsync(h_out_val_pinned, d_out_val, sizeof(int) * 150, cudaMemcpyDeviceToHost,stream1));
+    CUDA_CHECK(cudaMemcpyAsync(h_out_x_pinned, d_out_x, sizeof(float) * TOTAL_FEATURES, cudaMemcpyDeviceToHost,stream1));
+    CUDA_CHECK(cudaMemcpyAsync(h_out_y_pinned, d_out_y, sizeof(float) * TOTAL_FEATURES, cudaMemcpyDeviceToHost,stream1));
+    CUDA_CHECK(cudaMemcpyAsync(h_out_val_pinned, d_out_val, sizeof(int) * TOTAL_FEATURES, cudaMemcpyDeviceToHost,stream1));
 
     CUDA_CHECK(cudaStreamSynchronize(stream1));
 
     //printPinnedFeatures(h_out_x_pinned, h_out_y_pinned, h_out_val_pinned, numFeatures);
 
     // Copy to feature list (fast CPU copy)
-    for (i = 0; i < 150; ++i) {
+    for (i = 0; i < TOTAL_FEATURES; ++i) {
         h_fl->feature[i]->x = h_out_x_pinned[i];
         h_fl->feature[i]->y = h_out_y_pinned[i];
         h_fl->feature[i]->val = h_out_val_pinned[i];
