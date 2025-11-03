@@ -717,6 +717,7 @@ __global__ void trackFeatureKernelTest(
 	int tid = threadIdx.y * blockDim.x + threadIdx.x;
 	int window_elems = window_width * window_height;
 	
+
 	// Only track features that are not lost
 	if (d_in_val[featureIdx] < 0) {
 		if (tid == 0) {
@@ -794,7 +795,7 @@ __global__ void trackFeatureKernelTest(
 			}
 			__syncthreads();
 			
-			if (s_status != KLT_TRACKED) break;
+			//if (s_status != KLT_TRACKED) break;
 
 			// Each thread computes its window pixel
 			int i = threadIdx.x - hw;
@@ -897,6 +898,12 @@ __global__ void trackFeatureKernelTest(
 			d_out_val[featureIdx] = KLT_TRACKED;
             //printf("Feature %d x:%f y:%f\n",featureIdx,final_x,final_y);
 		}
+
+        printf(
+        "Feature %3d | Init:(%.1f, %.1f) -> Final:(%.1f, %.1f) | Status: %d | Iter: %d\n",
+        featureIdx, d_in_x[featureIdx], d_in_y[featureIdx],
+        d_out_x[featureIdx], d_out_y[featureIdx], d_out_val[featureIdx], s_iteration
+    );
         /*
         if (tid == 0) {
             if (final_val != KLT_TRACKED) {
@@ -1112,7 +1119,7 @@ __host__ void kltTrackFeaturesCUDA(
     int bordery = h_tc->bordery;
 
     // Copy data to pinned memory (fast CPU copy)
-    for (i = 0; i < numFeatures; ++i) {
+    for (i = 0; i < 150; ++i) {
         h_in_x_pinned[i] = h_fl->feature[i]->x;
         h_in_y_pinned[i] = h_fl->feature[i]->y; 
         h_in_val_pinned[i] = h_fl->feature[i]->val;
@@ -1125,9 +1132,9 @@ __host__ void kltTrackFeaturesCUDA(
         //printf("First frame - initializing device feature buffers\n");
          
         // Copy to device (fast pinned→device)
-        CUDA_CHECK(cudaMemcpyAsync(d_in_x, h_in_x_pinned, sizeof(float) * numFeatures, cudaMemcpyHostToDevice,stream1));
-        CUDA_CHECK(cudaMemcpyAsync(d_in_y, h_in_y_pinned, sizeof(float) * numFeatures, cudaMemcpyHostToDevice,stream1));
-        CUDA_CHECK(cudaMemcpyAsync(d_in_val, h_in_val_pinned, sizeof(int) * numFeatures, cudaMemcpyHostToDevice,stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_x, h_in_x_pinned, sizeof(float) * 150, cudaMemcpyHostToDevice,stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_y, h_in_y_pinned, sizeof(float) * 150, cudaMemcpyHostToDevice,stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_val, h_in_val_pinned, sizeof(int) * 150, cudaMemcpyHostToDevice,stream1));
         
     } else {
         //printf("Subsequent frame - copying outputs to inputs\n");
@@ -1145,15 +1152,15 @@ __host__ void kltTrackFeaturesCUDA(
         */
 
         // updated to imrpove tracking
-        CUDA_CHECK(cudaMemcpyAsync(d_in_x, h_out_x_pinned, sizeof(float) * numFeatures, cudaMemcpyHostToDevice, stream1));
-        CUDA_CHECK(cudaMemcpyAsync(d_in_y, h_out_y_pinned, sizeof(float) * numFeatures, cudaMemcpyHostToDevice, stream1));
-        CUDA_CHECK(cudaMemcpyAsync(d_in_val, h_out_val_pinned, sizeof(int) * numFeatures, cudaMemcpyHostToDevice, stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_x, h_out_x_pinned, sizeof(float) * 150, cudaMemcpyHostToDevice, stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_y, h_out_y_pinned, sizeof(float) * 150, cudaMemcpyHostToDevice, stream1));
+        CUDA_CHECK(cudaMemcpyAsync(d_in_val, h_out_val_pinned, sizeof(int) * 150, cudaMemcpyHostToDevice, stream1));
     }
 
    
     // V3.3: update launch configuration occupancy (windowsize=blocksize)
 	dim3 blockSize(window_width,window_height);
-    dim3 gridSize(numFeatures);
+    dim3 gridSize(150);
     size_t sharedMemSize = window_width * window_height * sizeof(float) * 3;
 
     /*
@@ -1197,16 +1204,16 @@ __host__ void kltTrackFeaturesCUDA(
     //CUDA_CHECK(cudaEventRecord(tracking_done, stream1));
     CUDA_CHECK(cudaStreamSynchronize(stream1));
 
-    CUDA_CHECK(cudaMemcpyAsync(h_out_x_pinned, d_out_x, sizeof(float) * numFeatures, cudaMemcpyDeviceToHost,stream1));
-    CUDA_CHECK(cudaMemcpyAsync(h_out_y_pinned, d_out_y, sizeof(float) * numFeatures, cudaMemcpyDeviceToHost,stream1));
-    CUDA_CHECK(cudaMemcpyAsync(h_out_val_pinned, d_out_val, sizeof(int) * numFeatures, cudaMemcpyDeviceToHost,stream1));
+    CUDA_CHECK(cudaMemcpyAsync(h_out_x_pinned, d_out_x, sizeof(float) * 150, cudaMemcpyDeviceToHost,stream1));
+    CUDA_CHECK(cudaMemcpyAsync(h_out_y_pinned, d_out_y, sizeof(float) * 150, cudaMemcpyDeviceToHost,stream1));
+    CUDA_CHECK(cudaMemcpyAsync(h_out_val_pinned, d_out_val, sizeof(int) * 150, cudaMemcpyDeviceToHost,stream1));
 
     CUDA_CHECK(cudaStreamSynchronize(stream1));
 
     //printPinnedFeatures(h_out_x_pinned, h_out_y_pinned, h_out_val_pinned, numFeatures);
 
     // Copy to feature list (fast CPU copy)
-    for (i = 0; i < numFeatures; ++i) {
+    for (i = 0; i < 150; ++i) {
         h_fl->feature[i]->x = h_out_x_pinned[i];
         h_fl->feature[i]->y = h_out_y_pinned[i];
         h_fl->feature[i]->val = h_out_val_pinned[i];

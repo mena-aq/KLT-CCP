@@ -470,7 +470,7 @@ __host__ void convolveImageHorizCUDA(
       d_imgin, d_imgout, ncols, nrows, kwidth, kernel_type, sigma);
   
   CUDA_CHECK(cudaGetLastError());
-  //CUDA_CHECK(cudaDeviceSynchronize());
+  CUDA_CHECK(cudaDeviceSynchronize());
 
 }
 
