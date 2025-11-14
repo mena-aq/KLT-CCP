@@ -16,6 +16,7 @@
 #include "klt.h"
 #include "klt_util.h"	/* _KLT_FloatImage */
 #include "pyramid.h"	/* _KLT_Pyramid */
+#include <float.h>
 
 extern int KLT_verbose;
 
@@ -27,6 +28,70 @@ typedef float *_FloatWindow;
  * Given a point (x,y) in an image, computes the bilinear interpolated 
  * gray-level value of the point in the image.  
  */
+
+static void verifyPyramidContents(const char* name, _KLT_Pyramid pyramid) {
+    printf("=== Verifying %s Pyramid ===\n", name);
+    
+    if (pyramid == NULL) {
+        printf("  ERROR: Pyramid is NULL\n");
+        printf("=== End %s Pyramid Verification ===\n\n", name);
+        return;
+    }
+    
+    printf("  Pyramid info: nLevels=%d, subsampling=%d\n", 
+           pyramid->nLevels, pyramid->subsampling);
+    
+    for (int level = 0; level < pyramid->nLevels; level++) {
+        _KLT_FloatImage img = pyramid->img[level];
+        if (img == NULL) {
+            printf("Level %d: ERROR - image is NULL\n", level);
+            continue;
+        }
+        
+        int ncols = pyramid->ncols[level];
+        int nrows = pyramid->nrows[level];
+        size_t level_size = (size_t)ncols * (size_t)nrows;
+        float *level_data = img->data;
+        
+        // Print level info and sample data
+        printf("Level %d (%dx%d):\n", level, ncols, nrows);
+        
+        // Print first row
+        printf("  First row: ");
+        for (int x = 0; x < (ncols < 10 ? ncols : 10); x++) {
+            printf("%6.1f ", level_data[x]);
+        }
+        printf("\n");
+        
+        // Print center region (if image is large enough)
+        if (nrows > 5 && ncols > 5) {
+            int center_y = nrows / 2;
+            int center_x = ncols / 2;
+            printf("  Center [%d,%d]: ", center_y, center_x);
+            for (int dx = -2; dx <= 2; dx++) {
+                int x = center_x + dx;
+                if (x >= 0 && x < ncols) {
+                    float val = level_data[center_y * ncols + x];
+                    printf("%6.1f ", val);
+                }
+            }
+            printf("\n");
+        }
+        
+        // Check for all zeros (might indicate a problem)
+        int zero_count = 0;
+        float min_val = FLT_MAX, max_val = -FLT_MAX;
+        for (size_t i = 0; i < level_size; i++) {
+            if (level_data[i] == 0.0f) zero_count++;
+            if (level_data[i] < min_val) min_val = level_data[i];
+            if (level_data[i] > max_val) max_val = level_data[i];
+        }
+        
+        printf("  Stats: zeros=%d/%zu (%.1f%%), min=%.2f, max=%.2f\n",
+               zero_count, level_size, (100.0f * zero_count) / level_size, min_val, max_val);
+    }
+    printf("=== End %s Pyramid Verification ===\n\n", name);
+}
 
 static float _interpolate(
   float x, 
@@ -1231,188 +1296,6 @@ static int _am_trackFeatureAffine(
  * Tracks feature points from one image to the next.
  */
 
-// flat array versions of pyramids
-// Initialize global arrays (add this after the declarations)
-float *d_pyramid1_data[32] = {0};
-float *d_pyramid1_gradx_data[32] = {0};
-float *d_pyramid1_grady_data[32] = {0};
-float *d_pyramid2_data[32] = {0};
-float *d_pyramid2_gradx_data[32] = {0};
-float *d_pyramid2_grady_data[32] = {0};
-int pyramid1_ncols[32] = {0};
-int pyramid1_nrows[32] = {0};
-int pyramid2_ncols[32] = {0};
-int pyramid2_nrows[32] = {0};
-
-#pragma acc routine vector
-float _interpolateFlat(float x, float y, float *img_data, int ncols, int nrows) {
-  int xt = (int)x;
-  int yt = (int)y;
-  float ax = x - xt;
-  float ay = y - yt;
-  
-  // Bounds checking
-  if (xt < 0 || yt < 0 || xt >= ncols-1 || yt >= nrows-1) {
-    return 0.0f;  // Or handle out-of-bounds appropriately
-  }
-  
-  float *ptr = img_data + yt * ncols + xt;
-  return ((1-ax) * (1-ay) * ptr[0] +
-          ax   * (1-ay) * ptr[1] +
-          (1-ax) *   ay   * ptr[ncols] +
-          ax   *   ay   * ptr[ncols+1]);
-}
-
-#pragma acc routine vector
-void _computeIntensityDifferenceFlat(
-  float *img1_data, int img1_ncols, int img1_nrows,
-  float *img2_data, int img2_ncols, int img2_nrows,
-  float x1, float y1, float x2, float y2,
-  int width, int height, float *imgdiff)
-{
-  int hw = width/2, hh = height/2;
-  int idx = 0;
-  
-  for (int j = -hh; j <= hh; j++) {
-    for (int i = -hw; i <= hw; i++) {
-      float g1 = _interpolateFlat(x1+i, y1+j, img1_data, img1_ncols, img1_nrows);
-      float g2 = _interpolateFlat(x2+i, y2+j, img2_data, img2_ncols, img2_nrows);
-      imgdiff[idx++] = g1 - g2;
-    }
-  }
-}
-
-#pragma acc routine vector
-void _computeGradientSumFlat(
-  float *gradx1_data, float *grady1_data, int grad1_ncols, int grad1_nrows,
-  float *gradx2_data, float *grady2_data, int grad2_ncols, int grad2_nrows,
-  float x1, float y1, float x2, float y2,
-  int width, int height, float *gradx, float *grady)
-{
-  int hw = width/2, hh = height/2;
-  int idx = 0;
-  
-  for (int j = -hh; j <= hh; j++) {
-    for (int i = -hw; i <= hw; i++) {
-      float gx1 = _interpolateFlat(x1+i, y1+j, gradx1_data, grad1_ncols, grad1_nrows);
-      float gx2 = _interpolateFlat(x2+i, y2+j, gradx2_data, grad2_ncols, grad2_nrows);
-      gradx[idx] = gx1 + gx2;
-      
-      float gy1 = _interpolateFlat(x1+i, y1+j, grady1_data, grad1_ncols, grad1_nrows);
-      float gy2 = _interpolateFlat(x2+i, y2+j, grady2_data, grad2_ncols, grad2_nrows);
-      grady[idx] = gy1 + gy2;
-      
-      idx++;
-    }
-  }
-}
-
-#pragma acc routine vector
-int _trackFeatureFlat(
-  float x1, float y1,
-  float *x2, float *y2,
-  float *img1_data, int img1_ncols, int img1_nrows,
-  float *gradx1_data, float *grady1_data,
-  float *img2_data, int img2_ncols, int img2_nrows, 
-  float *gradx2_data, float *grady2_data,
-  int width, int height,
-  float step_factor, int max_iterations,
-  float small, float th, float max_residue,
-  int lighting_insensitive)
-{
-  // Local windows in shared/private memory
-  int win_size = width * height;
-  float imgdiff[win_size], gradx[win_size], grady[win_size];  // Use VLA
-  int status;
-  int iteration = 0;
-
-  #pragma acc data create(imgdiff[0:win_size], gradx[0:win_size], grady[0:win_size])
-  {
-    float gxx, gxy, gyy, ex, ey, dx, dy;
-    int hw = width/2;
-    int hh = height/2;
-    float one_plus_eps = 1.001f;
-
-    /* Iteratively update the window position */
-    do  {
-      /* If out of bounds, exit loop */
-      if (x1-hw < 0.0f || img1_ncols-(x1+hw) < one_plus_eps ||
-          *x2-hw < 0.0f || img2_ncols-(*x2+hw) < one_plus_eps ||
-          y1-hh < 0.0f || img1_nrows-(y1+hh) < one_plus_eps ||
-          *y2-hh < 0.0f || img2_nrows-(*y2+hh) < one_plus_eps) {
-        status = KLT_OOB;
-        break;
-      }
-
-      /* Compute gradient and difference windows using flat arrays */
-      // if (lighting_insensitive) {
-      //   _computeIntensityDifferenceLightingInsensitiveFlat(
-      //     img1_data, img1_ncols, img1_nrows,
-      //     img2_data, img2_ncols, img2_nrows,
-      //     x1, y1, *x2, *y2, width, height, imgdiff);
-      //   _computeGradientSumLightingInsensitiveFlat(
-      //     gradx1_data, grady1_data, img1_ncols, img1_nrows,
-      //     gradx2_data, grady2_data, img2_ncols, img2_nrows,
-      //     img1_data, img2_data,  // needed for lighting insensitive
-      //     x1, y1, *x2, *y2, width, height, gradx, grady);
-      // } else {
-        _computeIntensityDifferenceFlat(
-          img1_data, img1_ncols, img1_nrows,
-          img2_data, img2_ncols, img2_nrows,
-          x1, y1, *x2, *y2, width, height, imgdiff);
-        _computeGradientSumFlat(
-          gradx1_data, grady1_data, img1_ncols, img1_nrows,
-          gradx2_data, grady2_data, img2_ncols, img2_nrows,
-          x1, y1, *x2, *y2, width, height, gradx, grady);
-      //}
-
-      /* Use these windows to construct matrices */
-      _compute2by2GradientMatrix(gradx, grady, width, height, &gxx, &gxy, &gyy);
-      _compute2by1ErrorVector(imgdiff, gradx, grady, width, height, step_factor, &ex, &ey);
-      
-      /* Using matrices, solve equation for new displacement */
-      status = _solveEquation(gxx, gxy, gyy, ex, ey, small, &dx, &dy);
-      if (status == KLT_SMALL_DET) break;
-
-      *x2 += dx;
-      *y2 += dy;
-      iteration++;
-
-    } while ((fabs(dx) >= th || fabs(dy) >= th) && iteration < max_iterations);
-
-    /* Check bounds and residue */
-    if (*x2-hw < 0.0f || img2_ncols-(*x2+hw) < one_plus_eps || 
-        *y2-hh < 0.0f || img2_nrows-(*y2+hh) < one_plus_eps) {
-      status = KLT_OOB;
-    }
-
-    if (status == KLT_TRACKED) {
-      // if (lighting_insensitive) {
-      //   _computeIntensityDifferenceLightingInsensitiveFlat(
-      //     img1_data, img1_ncols, img1_nrows,
-      //     img2_data, img2_ncols, img2_nrows,
-      //     x1, y1, *x2, *y2, width, height, imgdiff);
-      // } else {
-        _computeIntensityDifferenceFlat(
-          img1_data, img1_ncols, img1_nrows,
-          img2_data, img2_ncols, img2_nrows,
-          x1, y1, *x2, *y2, width, height, imgdiff);
-      //}
-      if (_sumAbsFloatWindow(imgdiff, width, height)/(width*height) > max_residue) {
-        status = KLT_LARGE_RESIDUE;
-      }
-    }
-
-  }
-
-  /* Return appropriate value */
-  if (status == KLT_SMALL_DET) return KLT_SMALL_DET;
-  else if (status == KLT_OOB) return KLT_OOB;
-  else if (status == KLT_LARGE_RESIDUE) return KLT_LARGE_RESIDUE;
-  else if (iteration >= max_iterations) return KLT_MAX_ITERATIONS;
-  else return KLT_TRACKED;
-}
-
 void KLTTrackFeatures(
 					  KLT_TrackingContext tc,
 					  KLT_PixelType *img1,
@@ -1464,628 +1347,233 @@ void KLTTrackFeatures(
 
 	/* Process first image by converting to float, smoothing, computing */
 	/* pyramid, and computing gradient pyramids */
+	if (tc->sequentialMode && tc->pyramid_last != NULL)  {
+		pyramid1 = (_KLT_Pyramid) tc->pyramid_last;
+		pyramid1_gradx = (_KLT_Pyramid) tc->pyramid_last_gradx;
+		pyramid1_grady = (_KLT_Pyramid) tc->pyramid_last_grady;
+		if (pyramid1->ncols[0] != ncols || pyramid1->nrows[0] != nrows)
+			KLTError("(KLTTrackFeatures) Size of incoming image (%d by %d) "
+			"is different from size of previous image (%d by %d)\n",
+			ncols, nrows, pyramid1->ncols[0], pyramid1->nrows[0]);
+		assert(pyramid1_gradx != NULL);
+		assert(pyramid1_grady != NULL);
+	} else  {
+		floatimg1_created = TRUE;
+		floatimg1 = _KLTCreateFloatImage(ncols, nrows);
+		_KLTToFloatImage(img1, ncols, nrows, tmpimg);
+		_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg1);
+		pyramid1 = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
+		_KLTComputePyramid(floatimg1, pyramid1, tc->pyramid_sigma_fact);
+		
+    verifyPyramidContents("pyramid1", pyramid1);
+    pyramid1_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
+		pyramid1_grady = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
+		for (i = 0 ; i < tc->nPyramidLevels ; i++)
+			_KLTComputeGradients(pyramid1->img[i], tc->grad_sigma, 
+			pyramid1_gradx->img[i],
+			pyramid1_grady->img[i]);
+	}
 
-  //#pragma acc data \
-  copyin(img1[0:ncols*nrows], img2[0:ncols*nrows]) \
-  create(floatimg1[0:ncols*nrows], floatimg2[0:ncols*nrows], tmpimg[0:ncols*nrows]) \
-  create(pyramid1, pyramid1_gradx, pyramid1_grady, pyramid2, pyramid2_gradx, pyramid2_grady) \
-  copy(featurelist->feature[0:featurelist->nFeatures])
+  verifyPyramidContents("image 1 GradX" ,pyramid1_gradx);
+  verifyPyramidContents("image 1 GradY" ,pyramid1_grady);
 
-  {
+	/* Do the same thing with second image */
+	floatimg2 = _KLTCreateFloatImage(ncols, nrows);
+	_KLTToFloatImage(img2, ncols, nrows, tmpimg);
+	_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg2);
+	pyramid2 = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
+	_KLTComputePyramid(floatimg2, pyramid2, tc->pyramid_sigma_fact);
 
-    // For sequential mode, don't allocate new memory, just use pointers
-    if (tc->sequentialMode && tc->pyramid_last != NULL) {
-        pyramid1 = (_KLT_Pyramid) tc->pyramid_last;
-        // Simplified sequential mode - just point to existing data
-        for (int i = 0; i < tc->nPyramidLevels; i++) {
-            pyramid1_ncols[i] = pyramid1->ncols[i];
-            pyramid1_nrows[i] = pyramid1->nrows[i];
-            int level_size = pyramid1_ncols[i] * pyramid1_nrows[i];
-            
-            // Just point to the existing sequential mode data
-            d_pyramid1_data[i] = pyramid1->img[i]->data;
-            d_pyramid1_gradx_data[i] = pyramid1_gradx->img[i]->data;
-            d_pyramid1_grady_data[i] = pyramid1_grady->img[i]->data;
-            
-            #pragma acc enter data copyin(d_pyramid1_data[i][0:level_size], \
-                                        d_pyramid1_gradx_data[i][0:level_size], \
-                                        d_pyramid1_grady_data[i][0:level_size])
-        }
+  verifyPyramidContents("pyramid2", pyramid2);
 
-    } else  {
+	pyramid2_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
+	pyramid2_grady = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
+	for (i = 0 ; i < tc->nPyramidLevels ; i++)
+		_KLTComputeGradients(pyramid2->img[i], tc->grad_sigma, 
+		pyramid2_gradx->img[i],
+		pyramid2_grady->img[i]);
 
-      floatimg1_created = TRUE;
-
-      // use this if removing the large outer pragma
-      floatimg1 = _KLTCreateFloatImage(ncols, nrows);
-      _KLTToFloatImage(img1, ncols, nrows, tmpimg);
-
-      /*
-      #pragma acc parallel loop
-      for (int i = 0; i < ncols * nrows; i++) {
-          tmpimg->data[i] = (float)img1[i];
-      }
-      */ 
-      
-      // Smooth on DEVICE
-      #pragma acc data copyin(tmpimg->data[0:ncols*nrows]) create(floatimg1->data[0:ncols*nrows])
-      {
-          //_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg1);
-          _KLTComputeSmoothedImageFlat(tmpimg->data, ncols, nrows, 
-                                      _KLTComputeSmoothSigma(tc), 
-                                      floatimg1->data);
-      }
-      // copy back for pyramid computation
-      #pragma acc update host(floatimg1->data[0:ncols*nrows])
-
-      //_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg1);
-   
-      pyramid1 = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
-      
-      /*
-      // Allocate pyramid level data on device (goes with outer clause if used)
-      for (int i = 0; i < tc->nPyramidLevels; i++) {
-        int level_size = pyramid1->img[i]->ncols * pyramid1->img[i]->nrows;
-        #pragma acc enter data create(pyramid1->img[i]->data[0:level_size])
-      }
-      */
-      
-      _KLTComputePyramid(floatimg1, pyramid1, tc->pyramid_sigma_fact);
-      pyramid1_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
-      pyramid1_grady = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
-      
-      /*
-      // Allocate gradient pyramid data (goes with outer clause if used)
-      for (int i = 0; i < tc->nPyramidLevels; i++) {
-        int level_size = pyramid1->img[i]->ncols * pyramid1->img[i]->nrows;
-        #pragma acc enter data create(pyramid1_gradx->img[i]->data[0:level_size], \
-                                     pyramid1_grady->img[i]->data[0:level_size])
-      }
-      */
-      
-      /*
-      // Allocate and keep pyramid data on device
-      for (int i = 0; i < tc->nPyramidLevels; i++) {
-          int level_size = pyramid1->img[i]->ncols * pyramid1->img[i]->nrows;
-          
-          // Keep pyramid image data on device
-          #pragma acc enter data copyin(pyramid1->img[i]->data[0:level_size])
-          
-          // Create and keep gradient data on device
-          #pragma acc enter data create(pyramid1_gradx->img[i]->data[0:level_size], \
-                                      pyramid1_grady->img[i]->data[0:level_size])
-      }
-      */
-    
-      /*
-       // ========== FLATTEN PYRAMID 1 ==========
-      for (int i = 0; i < tc->nPyramidLevels; i++) {
-        pyramid1_ncols[i] = pyramid1->ncols[i];
-        pyramid1_nrows[i] = pyramid1->nrows[i];
-        int level_size = pyramid1_ncols[i] * pyramid1_nrows[i];
-        
-        // Allocate device memory for this level
-        #pragma acc enter data create(d_pyramid1_data[i][0:level_size], \
-                                    d_pyramid1_gradx_data[i][0:level_size], \
-                                    d_pyramid1_grady_data[i][0:level_size])
-        
-        // Copy pyramid image data to device
-        #pragma acc update device(d_pyramid1_data[i][0:level_size])
-      }
-      */
-
-      // ========== SIMPLIFIED PYRAMID 1 FLAT ARRAYS ==========
-      for (int i = 0; i < tc->nPyramidLevels; i++) {
-          pyramid1_ncols[i] = pyramid1->ncols[i];
-          pyramid1_nrows[i] = pyramid1->nrows[i];
-          int level_size = pyramid1_ncols[i] * pyramid1_nrows[i];
-          
-          // Just point to the existing pyramid data (no allocation + memcpy)
-          d_pyramid1_data[i] = pyramid1->img[i]->data;
-          
-          // Compute gradients using original function
-          _KLTComputeGradients(pyramid1->img[i], tc->grad_sigma, 
-                              pyramid1_gradx->img[i],
-                              pyramid1_grady->img[i]);
-          
-          // Point to gradient data
-          d_pyramid1_gradx_data[i] = pyramid1_gradx->img[i]->data;
-          d_pyramid1_grady_data[i] = pyramid1_grady->img[i]->data;
-          
-          // Copy data to device
-          #pragma acc enter data copyin(d_pyramid1_data[i][0:level_size], \
-                                      d_pyramid1_gradx_data[i][0:level_size], \
-                                      d_pyramid1_grady_data[i][0:level_size])
-      }
-      // Copy dimension arrays to device
-      #pragma acc enter data copyin(pyramid1_ncols[0:tc->nPyramidLevels], \
-                                  pyramid1_nrows[0:tc->nPyramidLevels])
-
-
-      /*
-      // Compute gradients on DEVICE for each level
-      for (i = 0 ; i < tc->nPyramidLevels ; i++) {
-          int level_size = pyramid1->img[i]->ncols * pyramid1->img[i]->nrows;
-          
-          //#pragma acc data copyin(pyramid1->img[i]->data[0:level_size]) \
-                          create(pyramid1_gradx->img[i]->data[0:level_size], \
-                                pyramid1_grady->img[i]->data[0:level_size])
-          #pragma acc data present(pyramid1->img[i]->data[0:level_size], \
-                          pyramid1_gradx->img[i]->data[0:level_size], \
-                          pyramid1_grady->img[i]->data[0:level_size])
-          {
-              _KLTComputeGradients(pyramid1->img[i], tc->grad_sigma, 
-                                pyramid1_gradx->img[i],
-                                pyramid1_grady->img[i]);
-          }
-      }
-      */
-      // Compute gradients on DEVICE using flat arrays
-      for (i = 0 ; i < tc->nPyramidLevels ; i++) {
-        int level_size = pyramid1_ncols[i] * pyramid1_nrows[i];
-        
-        #pragma acc data present(d_pyramid1_data[i][0:level_size], \
-                                d_pyramid1_gradx_data[i][0:level_size], \
-                                d_pyramid1_grady_data[i][0:level_size])
-        {
-          // You'll need to modify _KLTComputeGradients to accept flat arrays
-          // or create a version that works with the flat structure
-          _KLTComputeGradientsFlat(d_pyramid1_data[i], pyramid1_ncols[i], pyramid1_nrows[i],
-                                  tc->grad_sigma, 
-                                  d_pyramid1_gradx_data[i],
-                                  d_pyramid1_grady_data[i]);
-        }
-      }
-      
-      /*
-      for (i = 0 ; i < tc->nPyramidLevels ; i++)
-        _KLTComputeGradients(pyramid1->img[i], tc->grad_sigma, 
-        pyramid1_gradx->img[i],
-        pyramid1_grady->img[i]);
-      */
-
-    }
-
-    /* Do the same thing with second image */
-
-    // uncomment if removing large outer pragma
-    floatimg2 = _KLTCreateFloatImage(ncols, nrows);
-    _KLTToFloatImage(img2, ncols, nrows, tmpimg);
-
-    // Convert to float on device
-    /*
-    #pragma acc parallel loop
-    for (int i = 0; i < ncols * nrows; i++) {
-        tmpimg->data[i] = (float)img2[i];
-    }
-    */
-    
-    // Smooth on DEVICE
-    #pragma acc data copyin(tmpimg->data[0:ncols*nrows]) create(floatimg2->data[0:ncols*nrows])
-    {
-        //_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg2);
-        _KLTComputeSmoothedImageFlat(tmpimg->data, ncols, nrows,
-                                      _KLTComputeSmoothSigma(tc),
-                                      floatimg2->data);
-    }
-    // copy back for pyramid computation
-    #pragma acc update host(floatimg2->data[0:ncols*nrows])
-
-    //_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg2);
-
-    pyramid2 = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
-    
-    /*
-    // Allocate pyramid2 level data (goes with outer clause if used)
-    for (int i = 0; i < tc->nPyramidLevels; i++) {
-      int level_size = pyramid2->img[i]->ncols * pyramid2->img[i]->nrows;
-      #pragma acc enter data create(pyramid2->img[i]->data[0:level_size])
-    }
-    */
-    
-    _KLTComputePyramid(floatimg2, pyramid2, tc->pyramid_sigma_fact);
-    pyramid2_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
-    pyramid2_grady = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
-    
-    /*
-    // Allocate gradient pyramid data for pyramid2 (goes with outer clause if used)
-    for (int i = 0; i < tc->nPyramidLevels; i++) {
-      int level_size = pyramid2->img[i]->ncols * pyramid2->img[i]->nrows;
-      #pragma acc enter data create(pyramid2_gradx->img[i]->data[0:level_size], \
-                                   pyramid2_grady->img[i]->data[0:level_size])
-    }
-    */
-
-    /*
-    // Allocate and keep pyramid data on device
-    for (int i = 0; i < tc->nPyramidLevels; i++) {
-        int level_size = pyramid2->img[i]->ncols * pyramid2->img[i]->nrows;
-        
-        // Keep pyramid image data on device
-        #pragma acc enter data copyin(pyramid2->img[i]->data[0:level_size])
-        
-        // Create and keep gradient data on device
-        #pragma acc enter data create(pyramid2_gradx->img[i]->data[0:level_size], \
-                                    pyramid2_grady->img[i]->data[0:level_size])
-    }
-
-    // Compute gradients on DEVICE for each level
-    for (i = 0 ; i < tc->nPyramidLevels ; i++) {
-      int level_size = pyramid2->img[i]->ncols * pyramid2->img[i]->nrows;
-      
-      //#pragma acc data copyin(pyramid2->img[i]->data[0:level_size]) \
-                      create(pyramid2_gradx->img[i]->data[0:level_size], \
-                            pyramid2_grady->img[i]->data[0:level_size])
-      #pragma acc data present(pyramid2->img[i]->data[0:level_size], \
-                            pyramid2_gradx->img[i]->data[0:level_size], \
-                            pyramid2_grady->img[i]->data[0:level_size])
-      {
-          _KLTComputeGradients(pyramid2->img[i], tc->grad_sigma, 
-                            pyramid2_gradx->img[i],
-                            pyramid2_grady->img[i]);
-      }
-    }
-    */
-
-    /*
-    // ========== FLATTEN PYRAMID 2 ==========
-    for (int i = 0; i < tc->nPyramidLevels; i++) {
-      pyramid2_ncols[i] = pyramid2->ncols[i];
-      pyramid2_nrows[i] = pyramid2->nrows[i];
-      int level_size = pyramid2_ncols[i] * pyramid2_nrows[i];
-      
-      // Allocate device memory for this level
-      #pragma acc enter data create(d_pyramid2_data[i][0:level_size], \
-                                  d_pyramid2_gradx_data[i][0:level_size], \
-                                  d_pyramid2_grady_data[i][0:level_size])
-      
-      // Copy pyramid image data to device
-      #pragma acc update device(d_pyramid2_data[i][0:level_size])
-    }
-    */
-
-    // ========== SIMPLIFIED PYRAMID 2 FLAT ARRAYS ==========
-    for (int i = 0; i < tc->nPyramidLevels; i++) {
-        pyramid2_ncols[i] = pyramid2->ncols[i];
-        pyramid2_nrows[i] = pyramid2->nrows[i];
-        int level_size = pyramid2_ncols[i] * pyramid2_nrows[i];
-        
-        // Just point to existing data
-        d_pyramid2_data[i] = pyramid2->img[i]->data;
-        
-        // Compute gradients
-        _KLTComputeGradients(pyramid2->img[i], tc->grad_sigma, 
-                            pyramid2_gradx->img[i],
-                            pyramid2_grady->img[i]);
-        
-        d_pyramid2_gradx_data[i] = pyramid2_gradx->img[i]->data;
-        d_pyramid2_grady_data[i] = pyramid2_grady->img[i]->data;
-        
-        #pragma acc enter data copyin(d_pyramid2_data[i][0:level_size], \
-                                    d_pyramid2_gradx_data[i][0:level_size], \
-                                    d_pyramid2_grady_data[i][0:level_size])
-    }
-
-    // Copy dimension arrays to device
-    #pragma acc enter data copyin(pyramid2_ncols[0:tc->nPyramidLevels], \
-                                pyramid2_nrows[0:tc->nPyramidLevels])
-
-    // Compute gradients on DEVICE using flat arrays
-    for (i = 0 ; i < tc->nPyramidLevels ; i++) {
-      int level_size = pyramid2_ncols[i] * pyramid2_nrows[i];
-      
-      #pragma acc data present(d_pyramid2_data[i][0:level_size], \
-                              d_pyramid2_gradx_data[i][0:level_size], \
-                              d_pyramid2_grady_data[i][0:level_size])
-      {
-        _KLTComputeGradientsFlat(d_pyramid2_data[i], pyramid2_ncols[i], pyramid2_nrows[i],
-                                tc->grad_sigma, 
-                                d_pyramid2_gradx_data[i],
-                                d_pyramid2_grady_data[i]);
-      }
-    }  
-    
-
-
-    /*
-    for (i = 0 ; i < tc->nPyramidLevels ; i++)
-      _KLTComputeGradients(pyramid2->img[i], tc->grad_sigma, 
-      pyramid2_gradx->img[i],
-      pyramid2_grady->img[i]);
-    */
-  
-    /* Write internal images */
-    // if (tc->writeInternalImages)  {
-    //   char fname[80];
-    //   for (i = 0 ; i < tc->nPyramidLevels ; i++)  {
-    //     sprintf(fname, "kltimg_tf_i%d.pgm", i);
-    //     _KLTWriteFloatImageToPGM(pyramid1->img[i], fname);
-    //     sprintf(fname, "kltimg_tf_i%d_gx.pgm", i);
-    //     _KLTWriteFloatImageToPGM(pyramid1_gradx->img[i], fname);
-    //     sprintf(fname, "kltimg_tf_i%d_gy.pgm", i);
-    //     _KLTWriteFloatImageToPGM(pyramid1_grady->img[i], fname);
-    //     sprintf(fname, "kltimg_tf_j%d.pgm", i);
-    //     _KLTWriteFloatImageToPGM(pyramid2->img[i], fname);
-    //     sprintf(fname, "kltimg_tf_j%d_gx.pgm", i);
-    //     _KLTWriteFloatImageToPGM(pyramid2_gradx->img[i], fname);
-    //     sprintf(fname, "kltimg_tf_j%d_gy.pgm", i);
-    //     _KLTWriteFloatImageToPGM(pyramid2_grady->img[i], fname);
-    //   }
-    // }
-  
+  verifyPyramidContents("image 2 GradX" ,pyramid2_gradx);
+  verifyPyramidContents("image 2 GradY" ,pyramid2_grady);
+	/* Write internal images */
+	if (tc->writeInternalImages)  {
+		char fname[80];
+		for (i = 0 ; i < tc->nPyramidLevels ; i++)  {
+			sprintf(fname, "kltimg_tf_i%d.pgm", i);
+			_KLTWriteFloatImageToPGM(pyramid1->img[i], fname);
+			sprintf(fname, "kltimg_tf_i%d_gx.pgm", i);
+			_KLTWriteFloatImageToPGM(pyramid1_gradx->img[i], fname);
+			sprintf(fname, "kltimg_tf_i%d_gy.pgm", i);
+			_KLTWriteFloatImageToPGM(pyramid1_grady->img[i], fname);
+			sprintf(fname, "kltimg_tf_j%d.pgm", i);
+			_KLTWriteFloatImageToPGM(pyramid2->img[i], fname);
+			sprintf(fname, "kltimg_tf_j%d_gx.pgm", i);
+			_KLTWriteFloatImageToPGM(pyramid2_gradx->img[i], fname);
+			sprintf(fname, "kltimg_tf_j%d_gy.pgm", i);
+			_KLTWriteFloatImageToPGM(pyramid2_grady->img[i], fname);
+		}
+	}
 
 	/* For each feature, do ... */
+	for (indx = 0 ; indx < featurelist->nFeatures ; indx++)  {
 
-    // if removing large outer pragma, uncomment below
-    //#pragma acc data \
-    present(pyramid1[0:tc->nPyramidLevels], pyramid1_gradx[0:tc->nPyramidLevels], pyramid1_grady[0:tc->nPyramidLevels]) \
-    present(pyramid2[0:tc->nPyramidLevels], pyramid2_gradx[0:tc->nPyramidLevels], pyramid2_grady[0:tc->nPyramidLevels]) \
-    copy(featurelist->feature[0:featurelist->nFeatures])
-     // ========== TRACKING WITH FLAT ARRAYS ==========
-    #pragma acc data \
-    present(d_pyramid1_data[0:tc->nPyramidLevels], d_pyramid1_gradx_data[0:tc->nPyramidLevels], d_pyramid1_grady_data[0:tc->nPyramidLevels]) \
-    present(d_pyramid2_data[0:tc->nPyramidLevels], d_pyramid2_gradx_data[0:tc->nPyramidLevels], d_pyramid2_grady_data[0:tc->nPyramidLevels]) \
-    present(pyramid1_ncols[0:tc->nPyramidLevels], pyramid1_nrows[0:tc->nPyramidLevels]) \
-    present(pyramid2_ncols[0:tc->nPyramidLevels], pyramid2_nrows[0:tc->nPyramidLevels]) \
-    copy(featurelist->feature[0:featurelist->nFeatures])
-    {
-      #pragma acc parallel loop gang
-      for (indx = 0 ; indx < featurelist->nFeatures ; indx++)  {
+		/* Only track features that are not lost */
+		if (featurelist->feature[indx]->val >= 0)  {
 
-        /* Only track features that are not lost */
-        if (featurelist->feature[indx]->val >= 0)  {
+			xloc = featurelist->feature[indx]->x;
+			yloc = featurelist->feature[indx]->y;
 
-          xloc = featurelist->feature[indx]->x;
-          yloc = featurelist->feature[indx]->y;
+			/* Transform location to coarsest resolution */
+			for (r = tc->nPyramidLevels - 1 ; r >= 0 ; r--)  {
+				xloc /= subsampling;  yloc /= subsampling;
+			}
+			xlocout = xloc;  ylocout = yloc;
 
-          /* Transform location to coarsest resolution */
-          for (r = tc->nPyramidLevels - 1 ; r >= 0 ; r--)  {
-            xloc /= subsampling;  yloc /= subsampling;
-          }
-          xlocout = xloc;  ylocout = yloc;
+			/* Beginning with coarsest resolution, do ... */
+			for (r = tc->nPyramidLevels - 1 ; r >= 0 ; r--)  {
 
-          /* Beginning with coarsest resolution, do ... */
-          for (r = tc->nPyramidLevels - 1 ; r >= 0 ; r--)  {
+				/* Track feature at current resolution */
+				xloc *= subsampling;  yloc *= subsampling;
+				xlocout *= subsampling;  ylocout *= subsampling;
 
-            /* Track feature at current resolution */
-            xloc *= subsampling;  yloc *= subsampling;
-            xlocout *= subsampling;  ylocout *= subsampling;
+				val = _trackFeature(xloc, yloc, 
+					&xlocout, &ylocout,
+					pyramid1->img[r], 
+					pyramid1_gradx->img[r], pyramid1_grady->img[r], 
+					pyramid2->img[r], 
+					pyramid2_gradx->img[r], pyramid2_grady->img[r],
+					tc->window_width, tc->window_height,
+					tc->step_factor,
+					tc->max_iterations,
+					tc->min_determinant,
+					tc->min_displacement,
+					tc->max_residue,
+					tc->lighting_insensitive);
 
-            /*
-            val = _trackFeature(xloc, yloc, 
-              &xlocout, &ylocout,
-              pyramid1->img[r], 
-              pyramid1_gradx->img[r], pyramid1_grady->img[r], 
-              pyramid2->img[r], 
-              pyramid2_gradx->img[r], pyramid2_grady->img[r],
-              tc->window_width, tc->window_height,
-              tc->step_factor,
-              tc->max_iterations,
-              tc->min_determinant,
-              tc->min_displacement,
-              tc->max_residue,
-              tc->lighting_insensitive);
-            */
+				if (val==KLT_SMALL_DET || val==KLT_OOB)
+					break;
+			}
 
-            val = _trackFeatureFlat(xloc, yloc, 
-                &xlocout, &ylocout,
-                d_pyramid1_data[r], pyramid1_ncols[r], pyramid1_nrows[r],
-                d_pyramid1_gradx_data[r], d_pyramid1_grady_data[r],
-                d_pyramid2_data[r], pyramid2_ncols[r], pyramid2_nrows[r], 
-                d_pyramid2_gradx_data[r], d_pyramid2_grady_data[r],
-                tc->window_width, tc->window_height,
-                tc->step_factor,
-                tc->max_iterations,
-                tc->min_determinant,
-                tc->min_displacement,
-                tc->max_residue,
-                tc->lighting_insensitive);
+			/* Record feature */
+			if (val == KLT_OOB) {
+				featurelist->feature[indx]->x   = -1.0;
+				featurelist->feature[indx]->y   = -1.0;
+				featurelist->feature[indx]->val = KLT_OOB;
+				if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
+				if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
+				if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
+				featurelist->feature[indx]->aff_img = NULL;
+				featurelist->feature[indx]->aff_img_gradx = NULL;
+				featurelist->feature[indx]->aff_img_grady = NULL;
 
-            if (val==KLT_SMALL_DET || val==KLT_OOB)
-              break;
-          }
+			} else if (_outOfBounds(xlocout, ylocout, ncols, nrows, tc->borderx, tc->bordery))  {
+				featurelist->feature[indx]->x   = -1.0;
+				featurelist->feature[indx]->y   = -1.0;
+				featurelist->feature[indx]->val = KLT_OOB;
+				if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
+				if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
+				if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
+				featurelist->feature[indx]->aff_img = NULL;
+				featurelist->feature[indx]->aff_img_gradx = NULL;
+				featurelist->feature[indx]->aff_img_grady = NULL;
+			} else if (val == KLT_SMALL_DET)  {
+				featurelist->feature[indx]->x   = -1.0;
+				featurelist->feature[indx]->y   = -1.0;
+				featurelist->feature[indx]->val = KLT_SMALL_DET;
+				if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
+				if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
+				if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
+				featurelist->feature[indx]->aff_img = NULL;
+				featurelist->feature[indx]->aff_img_gradx = NULL;
+				featurelist->feature[indx]->aff_img_grady = NULL;
+			} else if (val == KLT_LARGE_RESIDUE)  {
+				featurelist->feature[indx]->x   = -1.0;
+				featurelist->feature[indx]->y   = -1.0;
+				featurelist->feature[indx]->val = KLT_LARGE_RESIDUE;
+				if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
+				if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
+				if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
+				featurelist->feature[indx]->aff_img = NULL;
+				featurelist->feature[indx]->aff_img_gradx = NULL;
+				featurelist->feature[indx]->aff_img_grady = NULL;
+			} else if (val == KLT_MAX_ITERATIONS)  {
+				featurelist->feature[indx]->x   = -1.0;
+				featurelist->feature[indx]->y   = -1.0;
+				featurelist->feature[indx]->val = KLT_MAX_ITERATIONS;
+				if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
+				if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
+				if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
+				featurelist->feature[indx]->aff_img = NULL;
+				featurelist->feature[indx]->aff_img_gradx = NULL;
+				featurelist->feature[indx]->aff_img_grady = NULL;
+			} else  {
+				featurelist->feature[indx]->x = xlocout;
+				featurelist->feature[indx]->y = ylocout;
+				featurelist->feature[indx]->val = KLT_TRACKED;
+				if (tc->affineConsistencyCheck >= 0 && val == KLT_TRACKED)  { /*for affine mapping*/
+					int border = 2; /* add border for interpolation */
 
-          /* Simple feature recording - no affine check, no memory management */
-          if (val == KLT_OOB || val == KLT_SMALL_DET || 
-              val == KLT_LARGE_RESIDUE || val == KLT_MAX_ITERATIONS ||
-              _outOfBounds(xlocout, ylocout, ncols, nrows, tc->borderx, tc->bordery)) {
-            featurelist->feature[indx]->x = -1.0;
-            featurelist->feature[indx]->y = -1.0;
-            featurelist->feature[indx]->val = val;
-          } else {
-            featurelist->feature[indx]->x = xlocout;
-            featurelist->feature[indx]->y = ylocout;
-            featurelist->feature[indx]->val = KLT_TRACKED;
-          }
-              
-          // Record Feature
-    //       if (val == KLT_OOB) {
-    //         featurelist->feature[indx]->x   = -1.0;
-    //         featurelist->feature[indx]->y   = -1.0;
-    //         featurelist->feature[indx]->val = KLT_OOB;
-    //         if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
-    //         if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
-    //         if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
-    //         featurelist->feature[indx]->aff_img = NULL;
-    //         featurelist->feature[indx]->aff_img_gradx = NULL;
-    //         featurelist->feature[indx]->aff_img_grady = NULL;
-    //       } else if (_outOfBounds(xlocout, ylocout, ncols, nrows, tc->borderx, tc->bordery))  {
-    //         featurelist->feature[indx]->x   = -1.0;
-    //         featurelist->feature[indx]->y   = -1.0;
-    //         featurelist->feature[indx]->val = KLT_OOB;
-    //         if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
-    //         if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
-    //         if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
-    //         featurelist->feature[indx]->aff_img = NULL;
-    //         featurelist->feature[indx]->aff_img_gradx = NULL;
-    //         featurelist->feature[indx]->aff_img_grady = NULL;
-    //       } else if (val == KLT_SMALL_DET)  {
-    //         featurelist->feature[indx]->x   = -1.0;
-    //         featurelist->feature[indx]->y   = -1.0;
-    //         featurelist->feature[indx]->val = KLT_SMALL_DET;
-    //         if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
-    //         if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
-    //         if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
-    //         featurelist->feature[indx]->aff_img = NULL;
-    //         featurelist->feature[indx]->aff_img_gradx = NULL;
-    //         featurelist->feature[indx]->aff_img_grady = NULL;
-    //       } else if (val == KLT_LARGE_RESIDUE)  {
-    //         featurelist->feature[indx]->x   = -1.0;
-    //         featurelist->feature[indx]->y   = -1.0;
-    //         featurelist->feature[indx]->val = KLT_LARGE_RESIDUE;
-    //         if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
-    //         if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
-    //         if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
-    //         featurelist->feature[indx]->aff_img = NULL;
-    //         featurelist->feature[indx]->aff_img_gradx = NULL;
-    //         featurelist->feature[indx]->aff_img_grady = NULL;
-    //       } else if (val == KLT_MAX_ITERATIONS)  {
-    //         featurelist->feature[indx]->x   = -1.0;
-    //         featurelist->feature[indx]->y   = -1.0;
-    //         featurelist->feature[indx]->val = KLT_MAX_ITERATIONS;
-    //         if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
-    //         if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
-    //         if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
-    //         featurelist->feature[indx]->aff_img = NULL;
-    //         featurelist->feature[indx]->aff_img_gradx = NULL;
-    //         featurelist->feature[indx]->aff_img_grady = NULL;
-    //       } else  {
-    //         featurelist->feature[indx]->x = xlocout;
-    //         featurelist->feature[indx]->y = ylocout;
-    //         featurelist->feature[indx]->val = KLT_TRACKED;
-    //         if (tc->affineConsistencyCheck >= 0 && val == KLT_TRACKED)  { /*for affine mapping*/
-    //           int border = 2; /* add border for interpolation */
-    // #ifdef DEBUG_AFFINE_MAPPING	  
-    //           glob_index = indx;
-    // #endif
+#ifdef DEBUG_AFFINE_MAPPING	  
+					glob_index = indx;
+#endif
 
-    //           if(!featurelist->feature[indx]->aff_img){
-    //             /* save image and gradient for each feature at finest resolution after first successful track */
-    //             featurelist->feature[indx]->aff_img = _KLTCreateFloatImage((tc->affine_window_width+border), (tc->affine_window_height+border));
-    //             featurelist->feature[indx]->aff_img_gradx = _KLTCreateFloatImage((tc->affine_window_width+border), (tc->affine_window_height+border));
-    //             featurelist->feature[indx]->aff_img_grady = _KLTCreateFloatImage((tc->affine_window_width+border), (tc->affine_window_height+border));
-    //             _am_getSubFloatImage(pyramid1->img[0],xloc,yloc,featurelist->feature[indx]->aff_img);
-    //             _am_getSubFloatImage(pyramid1_gradx->img[0],xloc,yloc,featurelist->feature[indx]->aff_img_gradx);
-    //             _am_getSubFloatImage(pyramid1_grady->img[0],xloc,yloc,featurelist->feature[indx]->aff_img_grady);
-    //             featurelist->feature[indx]->aff_x = xloc - (int) xloc + (tc->affine_window_width+border)/2;
-    //             featurelist->feature[indx]->aff_y = yloc - (int) yloc + (tc->affine_window_height+border)/2;;
-    //           }else{
-    //             /* affine tracking */
-    //             val = _am_trackFeatureAffine(featurelist->feature[indx]->aff_x, featurelist->feature[indx]->aff_y,
-    //               &xlocout, &ylocout,
-    //               featurelist->feature[indx]->aff_img, 
-    //               featurelist->feature[indx]->aff_img_gradx, 
-    //               featurelist->feature[indx]->aff_img_grady,
-    //               pyramid2->img[0], 
-    //               pyramid2_gradx->img[0], pyramid2_grady->img[0],
-    //               tc->affine_window_width, tc->affine_window_height,
-    //               tc->step_factor,
-    //               tc->affine_max_iterations,
-    //               tc->min_determinant,
-    //               tc->min_displacement,
-    //               tc->affine_min_displacement,
-    //               tc->affine_max_residue, 
-    //               tc->lighting_insensitive,
-    //               tc->affineConsistencyCheck,
-    //               tc->affine_max_displacement_differ,
-    //               &featurelist->feature[indx]->aff_Axx,
-    //               &featurelist->feature[indx]->aff_Ayx,
-    //               &featurelist->feature[indx]->aff_Axy,
-    //               &featurelist->feature[indx]->aff_Ayy 
-    //               );
-    //             featurelist->feature[indx]->val = val;
-    //             if(val != KLT_TRACKED){
-    //               featurelist->feature[indx]->x   = -1.0;
-    //               featurelist->feature[indx]->y   = -1.0;
-    //               featurelist->feature[indx]->aff_x = -1.0;
-    //               featurelist->feature[indx]->aff_y = -1.0;
-    //               /* free image and gradient for lost feature */
-    //               _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
-    //               _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
-    //               _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
-    //               featurelist->feature[indx]->aff_img = NULL;
-    //               featurelist->feature[indx]->aff_img_gradx = NULL;
-    //               featurelist->feature[indx]->aff_img_grady = NULL;
-    //             }else{
-    //               /*featurelist->feature[indx]->x = xlocout;*/
-    //               /*featurelist->feature[indx]->y = ylocout;*/
-    //             }
-    //           }
-    //         }
-          
-    //       }
-          
-        } //endif
-      } //endfor
-    } //end pragma
+					if(!featurelist->feature[indx]->aff_img){
+						/* save image and gradient for each feature at finest resolution after first successful track */
+						featurelist->feature[indx]->aff_img = _KLTCreateFloatImage((tc->affine_window_width+border), (tc->affine_window_height+border));
+						featurelist->feature[indx]->aff_img_gradx = _KLTCreateFloatImage((tc->affine_window_width+border), (tc->affine_window_height+border));
+						featurelist->feature[indx]->aff_img_grady = _KLTCreateFloatImage((tc->affine_window_width+border), (tc->affine_window_height+border));
+						_am_getSubFloatImage(pyramid1->img[0],xloc,yloc,featurelist->feature[indx]->aff_img);
+						_am_getSubFloatImage(pyramid1_gradx->img[0],xloc,yloc,featurelist->feature[indx]->aff_img_gradx);
+						_am_getSubFloatImage(pyramid1_grady->img[0],xloc,yloc,featurelist->feature[indx]->aff_img_grady);
+						featurelist->feature[indx]->aff_x = xloc - (int) xloc + (tc->affine_window_width+border)/2;
+						featurelist->feature[indx]->aff_y = yloc - (int) yloc + (tc->affine_window_height+border)/2;;
+					}else{
+						/* affine tracking */
+						val = _am_trackFeatureAffine(featurelist->feature[indx]->aff_x, featurelist->feature[indx]->aff_y,
+							&xlocout, &ylocout,
+							featurelist->feature[indx]->aff_img, 
+							featurelist->feature[indx]->aff_img_gradx, 
+							featurelist->feature[indx]->aff_img_grady,
+							pyramid2->img[0], 
+							pyramid2_gradx->img[0], pyramid2_grady->img[0],
+							tc->affine_window_width, tc->affine_window_height,
+							tc->step_factor,
+							tc->affine_max_iterations,
+							tc->min_determinant,
+							tc->min_displacement,
+							tc->affine_min_displacement,
+							tc->affine_max_residue, 
+							tc->lighting_insensitive,
+							tc->affineConsistencyCheck,
+							tc->affine_max_displacement_differ,
+							&featurelist->feature[indx]->aff_Axx,
+							&featurelist->feature[indx]->aff_Ayx,
+							&featurelist->feature[indx]->aff_Axy,
+							&featurelist->feature[indx]->aff_Ayy 
+							);
+						featurelist->feature[indx]->val = val;
+						if(val != KLT_TRACKED){
+							featurelist->feature[indx]->x   = -1.0;
+							featurelist->feature[indx]->y   = -1.0;
+							featurelist->feature[indx]->aff_x = -1.0;
+							featurelist->feature[indx]->aff_y = -1.0;
+							/* free image and gradient for lost feature */
+							_KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
+							_KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
+							_KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
+							featurelist->feature[indx]->aff_img = NULL;
+							featurelist->feature[indx]->aff_img_gradx = NULL;
+							featurelist->feature[indx]->aff_img_grady = NULL;
+						}else{
+							/*featurelist->feature[indx]->x = xlocout;*/
+							/*featurelist->feature[indx]->y = ylocout;*/
+						}
+					}
+				}
 
-    /*
-    // Clean up when done (at the end of function)
-    for (int i = 0; i < tc->nPyramidLevels; i++) {
-        int level_size = pyramid2->img[i]->ncols * pyramid2->img[i]->nrows;
-        #pragma acc exit data delete(pyramid2->img[i]->data[0:level_size], \
-                                    pyramid2_gradx->img[i]->data[0:level_size], \
-                                    pyramid2_grady->img[i]->data[0:level_size])
-    }
-                                    */
-
-    /*
-    // ========== CLEANUP FLAT ARRAYS ==========
-      for (int i = 0; i < tc->nPyramidLevels; i++) {
-        int level_size = pyramid1_ncols[i] * pyramid1_nrows[i];
-        #pragma acc exit data delete(d_pyramid1_data[i][0:level_size], \
-                                    d_pyramid1_gradx_data[i][0:level_size], \
-                                    d_pyramid1_grady_data[i][0:level_size], \
-                                    d_pyramid2_data[i][0:level_size], \
-                                    d_pyramid2_gradx_data[i][0:level_size], \
-                                    d_pyramid2_grady_data[i][0:level_size])
-      }
-    */
-
-    /*
-    // ========== CLEANUP FLAT ARRAYS (BETTER APPROACH) ==========
-    // Remove dimension arrays from device
-    #pragma acc exit data delete(pyramid1_ncols[0:tc->nPyramidLevels], \
-                                pyramid1_nrows[0:tc->nPyramidLevels], \
-                                pyramid2_ncols[0:tc->nPyramidLevels], \
-                                pyramid2_nrows[0:tc->nPyramidLevels])
-
-    // Clean up pyramid flat arrays
-    for (int i = 0; i < tc->nPyramidLevels; i++) {
-        int level_size1 = pyramid1_ncols[i] * pyramid1_nrows[i];
-        int level_size2 = pyramid2_ncols[i] * pyramid2_nrows[i];
-        
-        #pragma acc exit data delete(d_pyramid1_data[i][0:level_size1], \
-                                    d_pyramid1_gradx_data[i][0:level_size1], \
-                                    d_pyramid1_grady_data[i][0:level_size1], \
-                                    d_pyramid2_data[i][0:level_size2], \
-                                    d_pyramid2_gradx_data[i][0:level_size2], \
-                                    d_pyramid2_grady_data[i][0:level_size2])
-        
-        // Free host memory
-        free(d_pyramid1_data[i]);
-        free(d_pyramid1_gradx_data[i]);
-        free(d_pyramid1_grady_data[i]);
-        free(d_pyramid2_data[i]);
-        free(d_pyramid2_gradx_data[i]);
-        free(d_pyramid2_grady_data[i]);
-    }
-    */
-
-     // ========== SIMPLIFIED CLEANUP ==========
-    // Just remove device data, no host freeing needed
-    for (int i = 0; i < tc->nPyramidLevels; i++) {
-        int level_size = pyramid1_ncols[i] * pyramid1_nrows[i];
-        #pragma acc exit data delete(d_pyramid1_data[i][0:level_size], \
-                                    d_pyramid1_gradx_data[i][0:level_size], \
-                                    d_pyramid1_grady_data[i][0:level_size], \
-                                    d_pyramid2_data[i][0:level_size], \
-                                    d_pyramid2_gradx_data[i][0:level_size], \
-                                    d_pyramid2_grady_data[i][0:level_size])
-    }
-    // No free() calls needed since we're just using pointers to existing data
-
-  }  
+			}
+		}
+	}
 
 	if (tc->sequentialMode)  {
 		tc->pyramid_last = pyramid2;
@@ -2096,7 +1584,6 @@ void KLTTrackFeatures(
 		_KLTFreePyramid(pyramid2_gradx);
 		_KLTFreePyramid(pyramid2_grady);
 	}
-
 
 	/* Free memory */
 	_KLTFreeFloatImage(tmpimg);

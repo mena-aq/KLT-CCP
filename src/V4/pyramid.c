@@ -8,6 +8,7 @@
 #include <stdlib.h>		/* malloc() ? */
 #include <string.h>		/* memset() ? */
 #include <math.h>		/* */
+#include <stdio.h>
 
 /* Our includes */
 #include "base.h"
@@ -37,7 +38,6 @@ _KLT_Pyramid _KLTCreatePyramid(
       subsampling != 8 && subsampling != 16 && subsampling != 32)
     KLTError("(_KLTCreatePyramid)  Pyramid's subsampling must "
              "be either 2, 4, 8, 16, or 32");
-
      
   /* Allocate memory for structure and set parameters */
   pyramid = (_KLT_Pyramid)  malloc(nbytes);
@@ -125,7 +125,6 @@ void _KLTComputePyramid(
 
     /* Reassign current image */
     currimg = pyramid->img[i];
-				
     _KLTFreeFloatImage(tmpimg);
   }
 }

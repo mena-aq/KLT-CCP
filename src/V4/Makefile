@@ -19,7 +19,7 @@ CPU_CFLAGS = $(FLAG1) $(FLAG2) -pg
 CPU_CC = gcc
 
 # GPU flags 
-GPU_CFLAGS = $(FLAG1) $(FLAG2) -acc -gpu=cc70 -Minfo=accel -fast
+GPU_CFLAGS = $(FLAG1) $(FLAG2) -acc -gpu=cc86 -Minfo=accel -fast
 GPU_LDFLAGS = -acc -gpu=cc70
 GPU_CC = nvc
 
@@ -112,4 +112,3 @@ clean:
 	      feat*.ppm features.ft features.txt gmon.out profile*.txt callgraph*.png output/* \
 	      example3_cpu example3_gpu libklt_cpu.a libklt_gpu.a
 	rm -rf output
-

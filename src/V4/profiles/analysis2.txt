@@ -1,0 +1,531 @@
+Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls  ms/call  ms/call  name    
+ 36.36      0.52     0.52      573     0.91     0.91  _convolveImageVert
+ 27.97      0.92     0.40      573     0.70     0.70  _convolveImageHoriz
+ 17.48      1.17     0.25 54424006     0.00     0.00  _interpolate
+  3.50      1.22     0.05   164239     0.00     0.00  _compute2by2GradientMatrix
+  2.45      1.25     0.04   226869     0.00     0.00  _computeIntensityDifference
+  2.10      1.28     0.03   164239     0.00     0.00  _compute2by1ErrorVector
+  2.10      1.31     0.03   164239     0.00     0.00  _computeGradientSum
+  2.10      1.34     0.03       96     0.31     0.31  _KLTToFloatImage
+  2.10      1.38     0.03       95     0.32     0.32  ppmWrite
+  1.40      1.40     0.02        1    20.00    35.13  _KLTSelectGoodFeatures
+  0.70      1.41     0.01       95     0.11     1.71  _KLTComputePyramid
+  0.70      1.42     0.01       94     0.11    14.47  KLTTrackFeatures
+  0.70      1.43     0.01        1    10.00    10.00  _quicksort
+  0.35      1.43     0.01                             KLTExtractFeatureHistory
+  0.00      1.43     0.00   187890     0.00     0.00  _allocateFloatWindow
+  0.00      1.43     0.00   164239     0.00     0.00  _solveEquation
+  0.00      1.43     0.00   123904     0.00     0.00  _minEigenvalue
+  0.00      1.43     0.00    62630     0.00     0.00  _sumAbsFloatWindow
+  0.00      1.43     0.00    62630     0.00     0.01  _trackFeature
+  0.00      1.43     0.00    52250     0.00     0.00  _printFeatureBin
+  0.00      1.43     0.00    52250     0.00     0.00  _printFeatureTxt
+  0.00      1.43     0.00    31315     0.00     0.00  _outOfBounds
+  0.00      1.43     0.00     3081     0.00     0.00  _KLTFreeFloatImage
+  0.00      1.43     0.00     1431     0.00     0.00  _KLTCreateFloatImage
+  0.00      1.43     0.00      573     0.00     1.61  _convolveSeparate
+  0.00      1.43     0.00      550     0.00     0.00  _fillFeaturemap
+  0.00      1.43     0.00      380     0.00     0.00  _getNextString
+  0.00      1.43     0.00      289     0.00     0.00  _computeKernels
+  0.00      1.43     0.00      285     0.00     0.00  _KLTCreatePyramid
+  0.00      1.43     0.00      285     0.00     0.00  _KLTFreePyramid
+  0.00      1.43     0.00      284     0.00     0.00  KLTCountRemainingFeatures
+  0.00      1.43     0.00      191     0.00     3.21  _KLTComputeGradients
+  0.00      1.43     0.00      191     0.00     1.61  _KLTComputeSmoothedImage
+  0.00      1.43     0.00       97     0.00     0.00  _KLTComputeSmoothSigma
+  0.00      1.43     0.00       95     0.00     0.00  KLTStoreFeatureList
+  0.00      1.43     0.00       95     0.00     0.32  KLTWriteFeatureListToPPM
+  0.00      1.43     0.00       95     0.00     0.00  _printInteger
+  0.00      1.43     0.00       95     0.00     0.00  _printNhyphens
+  0.00      1.43     0.00       95     0.00     0.00  pgmRead
+  0.00      1.43     0.00       95     0.00     0.00  pgmReadFile
+  0.00      1.43     0.00       95     0.00     0.00  pgmReadHeader
+  0.00      1.43     0.00       95     0.00     0.00  pnmReadHeader
+  0.00      1.43     0.00       95     0.00     0.32  ppmWriteFileRGB
+  0.00      1.43     0.00        7     0.00     0.00  _isCharInString
+  0.00      1.43     0.00        2     0.00     0.00  KLTWriteFeatureTable
+  0.00      1.43     0.00        2     0.00     0.00  _KLTGetKernelWidths
+  0.00      1.43     0.00        1     0.00     0.00  KLTChangeTCPyramid
+  0.00      1.43     0.00        1     0.00     0.00  KLTCreateFeatureList
+  0.00      1.43     0.00        1     0.00     0.00  KLTCreateFeatureTable
+  0.00      1.43     0.00        1     0.00     0.00  KLTCreateTrackingContext
+  0.00      1.43     0.00        1     0.00     0.00  KLTFreeFeatureList
+  0.00      1.43     0.00        1     0.00     0.00  KLTFreeFeatureTable
+  0.00      1.43     0.00        1     0.00     0.00  KLTFreeTrackingContext
+  0.00      1.43     0.00        1     0.00    35.13  KLTSelectGoodFeatures
+  0.00      1.43     0.00        1     0.00     0.00  KLTUpdateTCBorder
+  0.00      1.43     0.00        1     0.00     0.00  _createArray2D
+  0.00      1.43     0.00        1     0.00     0.00  _enforceMinimumDistance
+  0.00      1.43     0.00        1     0.00     0.00  _findStringWidth
+  0.00      1.43     0.00        1     0.00     0.00  _printHeader
+  0.00      1.43     0.00        1     0.00     0.00  _printSetupBin
+  0.00      1.43     0.00        1     0.00     0.00  _printSetupTxt
+  0.00      1.43     0.00        1     0.00     0.00  _printShutdown
+  0.00      1.43     0.00        1     0.00     0.00  _pyramidSigma
+  0.00      1.43     0.00        1     0.00    10.00  _sortPointList
+  0.00      1.43     0.00        1     0.00     0.00  count_image_files
+
+ %         the percentage of the total running time of the
+time       program used by this function.
+
+cumulative a running sum of the number of seconds accounted
+ seconds   for by this function and those listed above it.
+
+ self      the number of seconds accounted for by this
+seconds    function alone.  This is the major sort for this
+           listing.
+
+calls      the number of times this function was invoked, if
+           this function is profiled, else blank.
+
+ self      the average number of milliseconds spent in this
+ms/call    function per call, if this function is profiled,
+	   else blank.
+
+ total     the average number of milliseconds spent in this
+ms/call    function and its descendents per call, if this
+	   function is profiled, else blank.
+
+name       the name of the function.  This is the minor sort
+           for this listing. The index shows the location of
+	   the function in the gprof listing. If the index is
+	   in parenthesis it shows where it would appear in
+	   the gprof listing if it were to be printed.
+
+Copyright (C) 2012-2024 Free Software Foundation, Inc.
+
+Copying and distribution of this file, with or without modification,
+are permitted in any medium without royalty provided the copyright
+notice and this notice are preserved.
+
+		     Call graph (explanation follows)
+
+
+granularity: each sample hit covers 4 byte(s) for 0.70% of 1.43 seconds
+
+index % time    self  children    called     name
+                                                 <spontaneous>
+[1]     99.7    0.00    1.43                 main [1]
+                0.01    1.35      94/94          KLTTrackFeatures [2]
+                0.00    0.04       1/1           KLTSelectGoodFeatures [14]
+                0.00    0.03      95/95          KLTWriteFeatureListToPPM [16]
+                0.00    0.00      95/95          pgmReadFile [27]
+                0.00    0.00      95/95          KLTStoreFeatureList [25]
+                0.00    0.00       2/2           KLTWriteFeatureTable [30]
+                0.00    0.00       1/1           count_image_files [39]
+                0.00    0.00       1/1           KLTCreateTrackingContext [34]
+                0.00    0.00       1/1           KLTCreateFeatureList [32]
+                0.00    0.00       1/1           KLTCreateFeatureTable [33]
+                0.00    0.00       1/1           KLTFreeFeatureTable [36]
+                0.00    0.00       1/1           KLTFreeTrackingContext [37]
+                0.00    0.00       1/1           KLTFreeFeatureList [35]
+-----------------------------------------------
+                0.01    1.35      94/94          main [1]
+[2]     95.1    0.01    1.35      94         KLTTrackFeatures [2]
+                0.00    0.61     190/191         _KLTComputeGradients [4]
+                0.00    0.40   62630/62630       _trackFeature [7]
+                0.01    0.15      95/95          _KLTComputePyramid [11]
+                0.00    0.15      95/191         _KLTComputeSmoothedImage [8]
+                0.03    0.00      95/96          _KLTToFloatImage [20]
+                0.00    0.00   31315/31315       _outOfBounds [72]
+                0.00    0.00     285/285         _KLTCreatePyramid [78]
+                0.00    0.00     282/285         _KLTFreePyramid [79]
+                0.00    0.00     189/1431        _KLTCreateFloatImage [74]
+                0.00    0.00     189/3081        _KLTFreeFloatImage [73]
+                0.00    0.00     188/284         KLTCountRemainingFeatures [24]
+                0.00    0.00      95/97          _KLTComputeSmoothSigma [80]
+-----------------------------------------------
+                0.00    0.31     191/573         _KLTComputeSmoothedImage [8]
+                0.00    0.61     382/573         _KLTComputeGradients [4]
+[3]     64.3    0.00    0.92     573         _convolveSeparate [3]
+                0.52    0.00     573/573         _convolveImageVert [5]
+                0.40    0.00     573/573         _convolveImageHoriz [6]
+                0.00    0.00     573/1431        _KLTCreateFloatImage [74]
+                0.00    0.00     573/3081        _KLTFreeFloatImage [73]
+-----------------------------------------------
+                0.00    0.00       1/191         _KLTSelectGoodFeatures [15]
+                0.00    0.61     190/191         KLTTrackFeatures [2]
+[4]     42.9    0.00    0.61     191         _KLTComputeGradients [4]
+                0.00    0.61     382/573         _convolveSeparate [3]
+                0.00    0.00      96/289         _computeKernels [77]
+-----------------------------------------------
+                0.52    0.00     573/573         _convolveSeparate [3]
+[5]     36.4    0.52    0.00     573         _convolveImageVert [5]
+-----------------------------------------------
+                0.40    0.00     573/573         _convolveSeparate [3]
+[6]     28.0    0.40    0.00     573         _convolveImageHoriz [6]
+-----------------------------------------------
+                0.00    0.40   62630/62630       KLTTrackFeatures [2]
+[7]     27.6    0.00    0.40   62630         _trackFeature [7]
+                0.03    0.15  164239/164239      _computeGradientSum [10]
+                0.04    0.10  226869/226869      _computeIntensityDifference [12]
+                0.05    0.00  164239/164239      _compute2by2GradientMatrix [13]
+                0.03    0.00  164239/164239      _compute2by1ErrorVector [19]
+                0.00    0.00  187890/187890      _allocateFloatWindow [66]
+                0.00    0.00  164239/164239      _solveEquation [67]
+                0.00    0.00   62630/62630       _sumAbsFloatWindow [69]
+-----------------------------------------------
+                0.00    0.00       1/191         _KLTSelectGoodFeatures [15]
+                0.00    0.15      95/191         KLTTrackFeatures [2]
+                0.00    0.15      95/191         _KLTComputePyramid [11]
+[8]     21.4    0.00    0.31     191         _KLTComputeSmoothedImage [8]
+                0.00    0.31     191/573         _convolveSeparate [3]
+                0.00    0.00     191/289         _computeKernels [77]
+-----------------------------------------------
+                0.10    0.00 22233162/54424006     _computeIntensityDifference [12]
+                0.15    0.00 32190844/54424006     _computeGradientSum [10]
+[9]     17.5    0.25    0.00 54424006         _interpolate [9]
+-----------------------------------------------
+                0.03    0.15  164239/164239      _trackFeature [7]
+[10]    12.4    0.03    0.15  164239         _computeGradientSum [10]
+                0.15    0.00 32190844/54424006     _interpolate [9]
+-----------------------------------------------
+                0.01    0.15      95/95          KLTTrackFeatures [2]
+[11]    11.4    0.01    0.15      95         _KLTComputePyramid [11]
+                0.00    0.15      95/191         _KLTComputeSmoothedImage [8]
+                0.00    0.00      95/1431        _KLTCreateFloatImage [74]
+                0.00    0.00      95/3081        _KLTFreeFloatImage [73]
+-----------------------------------------------
+                0.04    0.10  226869/226869      _trackFeature [7]
+[12]     9.6    0.04    0.10  226869         _computeIntensityDifference [12]
+                0.10    0.00 22233162/54424006     _interpolate [9]
+-----------------------------------------------
+                0.05    0.00  164239/164239      _trackFeature [7]
+[13]     3.5    0.05    0.00  164239         _compute2by2GradientMatrix [13]
+-----------------------------------------------
+                0.00    0.04       1/1           main [1]
+[14]     2.5    0.00    0.04       1         KLTSelectGoodFeatures [14]
+                0.02    0.02       1/1           _KLTSelectGoodFeatures [15]
+                0.00    0.00       1/284         KLTCountRemainingFeatures [24]
+-----------------------------------------------
+                0.02    0.02       1/1           KLTSelectGoodFeatures [14]
+[15]     2.5    0.02    0.02       1         _KLTSelectGoodFeatures [15]
+                0.00    0.01       1/1           _sortPointList [22]
+                0.00    0.00       1/191         _KLTComputeGradients [4]
+                0.00    0.00       1/191         _KLTComputeSmoothedImage [8]
+                0.00    0.00       1/96          _KLTToFloatImage [20]
+                0.00    0.00  123904/123904      _minEigenvalue [68]
+                0.00    0.00       4/1431        _KLTCreateFloatImage [74]
+                0.00    0.00       4/3081        _KLTFreeFloatImage [73]
+                0.00    0.00       1/97          _KLTComputeSmoothSigma [80]
+                0.00    0.00       1/1           _enforceMinimumDistance [86]
+-----------------------------------------------
+                0.00    0.03      95/95          main [1]
+[16]     2.1    0.00    0.03      95         KLTWriteFeatureListToPPM [16]
+                0.00    0.03      95/95          ppmWriteFileRGB [18]
+                0.00    0.00      95/284         KLTCountRemainingFeatures [24]
+-----------------------------------------------
+                0.03    0.00      95/95          ppmWriteFileRGB [18]
+[17]     2.1    0.03    0.00      95         ppmWrite [17]
+-----------------------------------------------
+                0.00    0.03      95/95          KLTWriteFeatureListToPPM [16]
+[18]     2.1    0.00    0.03      95         ppmWriteFileRGB [18]
+                0.03    0.00      95/95          ppmWrite [17]
+-----------------------------------------------
+                0.03    0.00  164239/164239      _trackFeature [7]
+[19]     2.1    0.03    0.00  164239         _compute2by1ErrorVector [19]
+-----------------------------------------------
+                0.00    0.00       1/96          _KLTSelectGoodFeatures [15]
+                0.03    0.00      95/96          KLTTrackFeatures [2]
+[20]     2.1    0.03    0.00      96         _KLTToFloatImage [20]
+-----------------------------------------------
+                               72645             _quicksort [21]
+                0.01    0.00       1/1           _sortPointList [22]
+[21]     0.7    0.01    0.00       1+72645   _quicksort [21]
+                               72645             _quicksort [21]
+-----------------------------------------------
+                0.00    0.01       1/1           _KLTSelectGoodFeatures [15]
+[22]     0.7    0.00    0.01       1         _sortPointList [22]
+                0.01    0.00       1/1           _quicksort [21]
+-----------------------------------------------
+                                                 <spontaneous>
+[23]     0.3    0.01    0.00                 KLTExtractFeatureHistory [23]
+-----------------------------------------------
+                0.00    0.00       1/284         KLTSelectGoodFeatures [14]
+                0.00    0.00      95/284         KLTWriteFeatureListToPPM [16]
+                0.00    0.00     188/284         KLTTrackFeatures [2]
+[24]     0.0    0.00    0.00     284         KLTCountRemainingFeatures [24]
+-----------------------------------------------
+                0.00    0.00      95/95          main [1]
+[25]     0.0    0.00    0.00      95         KLTStoreFeatureList [25]
+-----------------------------------------------
+                0.00    0.00      95/95          pgmReadFile [27]
+[26]     0.0    0.00    0.00      95         pgmRead [26]
+                0.00    0.00      95/95          pgmReadHeader [28]
+-----------------------------------------------
+                0.00    0.00      95/95          main [1]
+[27]     0.0    0.00    0.00      95         pgmReadFile [27]
+                0.00    0.00      95/95          pgmRead [26]
+-----------------------------------------------
+                0.00    0.00      95/95          pgmRead [26]
+[28]     0.0    0.00    0.00      95         pgmReadHeader [28]
+                0.00    0.00      95/95          pnmReadHeader [29]
+-----------------------------------------------
+                0.00    0.00      95/95          pgmReadHeader [28]
+[29]     0.0    0.00    0.00      95         pnmReadHeader [29]
+                0.00    0.00     380/380         _getNextString [76]
+-----------------------------------------------
+                0.00    0.00       2/2           main [1]
+[30]     0.0    0.00    0.00       2         KLTWriteFeatureTable [30]
+                0.00    0.00   52250/52250       _printFeatureTxt [71]
+                0.00    0.00   52250/52250       _printFeatureBin [70]
+                0.00    0.00       1/1           _printSetupTxt [90]
+                0.00    0.00       1/1           _printHeader [88]
+                0.00    0.00       1/1           _printShutdown [91]
+                0.00    0.00       1/1           _printSetupBin [89]
+-----------------------------------------------
+                0.00    0.00       1/1           KLTCreateTrackingContext [34]
+[31]     0.0    0.00    0.00       1         KLTChangeTCPyramid [31]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[32]     0.0    0.00    0.00       1         KLTCreateFeatureList [32]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[33]     0.0    0.00    0.00       1         KLTCreateFeatureTable [33]
+                0.00    0.00       1/1           _createArray2D [85]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[34]     0.0    0.00    0.00       1         KLTCreateTrackingContext [34]
+                0.00    0.00       1/1           KLTUpdateTCBorder [38]
+                0.00    0.00       1/1           KLTChangeTCPyramid [31]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[35]     0.0    0.00    0.00       1         KLTFreeFeatureList [35]
+                0.00    0.00    1650/3081        _KLTFreeFloatImage [73]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[36]     0.0    0.00    0.00       1         KLTFreeFeatureTable [36]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[37]     0.0    0.00    0.00       1         KLTFreeTrackingContext [37]
+                0.00    0.00       3/285         _KLTFreePyramid [79]
+-----------------------------------------------
+                0.00    0.00       1/1           KLTCreateTrackingContext [34]
+[38]     0.0    0.00    0.00       1         KLTUpdateTCBorder [38]
+                0.00    0.00       2/2           _KLTGetKernelWidths [84]
+                0.00    0.00       1/97          _KLTComputeSmoothSigma [80]
+                0.00    0.00       1/1           _pyramidSigma [92]
+-----------------------------------------------
+                0.00    0.00       1/1           main [1]
+[39]     0.0    0.00    0.00       1         count_image_files [39]
+-----------------------------------------------
+                0.00    0.00  187890/187890      _trackFeature [7]
+[66]     0.0    0.00    0.00  187890         _allocateFloatWindow [66]
+-----------------------------------------------
+                0.00    0.00  164239/164239      _trackFeature [7]
+[67]     0.0    0.00    0.00  164239         _solveEquation [67]
+-----------------------------------------------
+                0.00    0.00  123904/123904      _KLTSelectGoodFeatures [15]
+[68]     0.0    0.00    0.00  123904         _minEigenvalue [68]
+-----------------------------------------------
+                0.00    0.00   62630/62630       _trackFeature [7]
+[69]     0.0    0.00    0.00   62630         _sumAbsFloatWindow [69]
+-----------------------------------------------
+                0.00    0.00   52250/52250       KLTWriteFeatureTable [30]
+[70]     0.0    0.00    0.00   52250         _printFeatureBin [70]
+-----------------------------------------------
+                0.00    0.00   52250/52250       KLTWriteFeatureTable [30]
+[71]     0.0    0.00    0.00   52250         _printFeatureTxt [71]
+-----------------------------------------------
+                0.00    0.00   31315/31315       KLTTrackFeatures [2]
+[72]     0.0    0.00    0.00   31315         _outOfBounds [72]
+-----------------------------------------------
+                0.00    0.00       4/3081        _KLTSelectGoodFeatures [15]
+                0.00    0.00      95/3081        _KLTComputePyramid [11]
+                0.00    0.00     189/3081        KLTTrackFeatures [2]
+                0.00    0.00     570/3081        _KLTFreePyramid [79]
+                0.00    0.00     573/3081        _convolveSeparate [3]
+                0.00    0.00    1650/3081        KLTFreeFeatureList [35]
+[73]     0.0    0.00    0.00    3081         _KLTFreeFloatImage [73]
+-----------------------------------------------
+                0.00    0.00       4/1431        _KLTSelectGoodFeatures [15]
+                0.00    0.00      95/1431        _KLTComputePyramid [11]
+                0.00    0.00     189/1431        KLTTrackFeatures [2]
+                0.00    0.00     570/1431        _KLTCreatePyramid [78]
+                0.00    0.00     573/1431        _convolveSeparate [3]
+[74]     0.0    0.00    0.00    1431         _KLTCreateFloatImage [74]
+-----------------------------------------------
+                0.00    0.00     550/550         _enforceMinimumDistance [86]
+[75]     0.0    0.00    0.00     550         _fillFeaturemap [75]
+-----------------------------------------------
+                0.00    0.00     380/380         pnmReadHeader [29]
+[76]     0.0    0.00    0.00     380         _getNextString [76]
+-----------------------------------------------
+                0.00    0.00       2/289         _KLTGetKernelWidths [84]
+                0.00    0.00      96/289         _KLTComputeGradients [4]
+                0.00    0.00     191/289         _KLTComputeSmoothedImage [8]
+[77]     0.0    0.00    0.00     289         _computeKernels [77]
+-----------------------------------------------
+                0.00    0.00     285/285         KLTTrackFeatures [2]
+[78]     0.0    0.00    0.00     285         _KLTCreatePyramid [78]
+                0.00    0.00     570/1431        _KLTCreateFloatImage [74]
+-----------------------------------------------
+                0.00    0.00       3/285         KLTFreeTrackingContext [37]
+                0.00    0.00     282/285         KLTTrackFeatures [2]
+[79]     0.0    0.00    0.00     285         _KLTFreePyramid [79]
+                0.00    0.00     570/3081        _KLTFreeFloatImage [73]
+-----------------------------------------------
+                0.00    0.00       1/97          _KLTSelectGoodFeatures [15]
+                0.00    0.00       1/97          KLTUpdateTCBorder [38]
+                0.00    0.00      95/97          KLTTrackFeatures [2]
+[80]     0.0    0.00    0.00      97         _KLTComputeSmoothSigma [80]
+-----------------------------------------------
+                0.00    0.00      95/95          _printHeader [88]
+[81]     0.0    0.00    0.00      95         _printInteger [81]
+-----------------------------------------------
+                0.00    0.00      95/95          _printHeader [88]
+[82]     0.0    0.00    0.00      95         _printNhyphens [82]
+-----------------------------------------------
+                0.00    0.00       7/7           _findStringWidth [87]
+[83]     0.0    0.00    0.00       7         _isCharInString [83]
+-----------------------------------------------
+                0.00    0.00       2/2           KLTUpdateTCBorder [38]
+[84]     0.0    0.00    0.00       2         _KLTGetKernelWidths [84]
+                0.00    0.00       2/289         _computeKernels [77]
+-----------------------------------------------
+                0.00    0.00       1/1           KLTCreateFeatureTable [33]
+[85]     0.0    0.00    0.00       1         _createArray2D [85]
+-----------------------------------------------
+                0.00    0.00       1/1           _KLTSelectGoodFeatures [15]
+[86]     0.0    0.00    0.00       1         _enforceMinimumDistance [86]
+                0.00    0.00     550/550         _fillFeaturemap [75]
+-----------------------------------------------
+                0.00    0.00       1/1           _printHeader [88]
+[87]     0.0    0.00    0.00       1         _findStringWidth [87]
+                0.00    0.00       7/7           _isCharInString [83]
+-----------------------------------------------
+                0.00    0.00       1/1           KLTWriteFeatureTable [30]
+[88]     0.0    0.00    0.00       1         _printHeader [88]
+                0.00    0.00      95/95          _printInteger [81]
+                0.00    0.00      95/95          _printNhyphens [82]
+                0.00    0.00       1/1           _findStringWidth [87]
+-----------------------------------------------
+                0.00    0.00       1/1           KLTWriteFeatureTable [30]
+[89]     0.0    0.00    0.00       1         _printSetupBin [89]
+-----------------------------------------------
+                0.00    0.00       1/1           KLTWriteFeatureTable [30]
+[90]     0.0    0.00    0.00       1         _printSetupTxt [90]
+-----------------------------------------------
+                0.00    0.00       1/1           KLTWriteFeatureTable [30]
+[91]     0.0    0.00    0.00       1         _printShutdown [91]
+-----------------------------------------------
+                0.00    0.00       1/1           KLTUpdateTCBorder [38]
+[92]     0.0    0.00    0.00       1         _pyramidSigma [92]
+-----------------------------------------------
+
+ This table describes the call tree of the program, and was sorted by
+ the total amount of time spent in each function and its children.
+
+ Each entry in this table consists of several lines.  The line with the
+ index number at the left hand margin lists the current function.
+ The lines above it list the functions that called this function,
+ and the lines below it list the functions this one called.
+ This line lists:
+     index	A unique number given to each element of the table.
+		Index numbers are sorted numerically.
+		The index number is printed next to every function name so
+		it is easier to look up where the function is in the table.
+
+     % time	This is the percentage of the `total' time that was spent
+		in this function and its children.  Note that due to
+		different viewpoints, functions excluded by options, etc,
+		these numbers will NOT add up to 100%.
+
+     self	This is the total amount of time spent in this function.
+
+     children	This is the total amount of time propagated into this
+		function by its children.
+
+     called	This is the number of times the function was called.
+		If the function called itself recursively, the number
+		only includes non-recursive calls, and is followed by
+		a `+' and the number of recursive calls.
+
+     name	The name of the current function.  The index number is
+		printed after it.  If the function is a member of a
+		cycle, the cycle number is printed between the
+		function's name and the index number.
+
+
+ For the function's parents, the fields have the following meanings:
+
+     self	This is the amount of time that was propagated directly
+		from the function into this parent.
+
+     children	This is the amount of time that was propagated from
+		the function's children into this parent.
+
+     called	This is the number of times this parent called the
+		function `/' the total number of times the function
+		was called.  Recursive calls to the function are not
+		included in the number after the `/'.
+
+     name	This is the name of the parent.  The parent's index
+		number is printed after it.  If the parent is a
+		member of a cycle, the cycle number is printed between
+		the name and the index number.
+
+ If the parents of the function cannot be determined, the word
+ `<spontaneous>' is printed in the `name' field, and all the other
+ fields are blank.
+
+ For the function's children, the fields have the following meanings:
+
+     self	This is the amount of time that was propagated directly
+		from the child into the function.
+
+     children	This is the amount of time that was propagated from the
+		child's children to the function.
+
+     called	This is the number of times the function called
+		this child `/' the total number of times the child
+		was called.  Recursive calls by the child are not
+		listed in the number after the `/'.
+
+     name	This is the name of the child.  The child's index
+		number is printed after it.  If the child is a
+		member of a cycle, the cycle number is printed
+		between the name and the index number.
+
+ If there are any cycles (circles) in the call graph, there is an
+ entry for the cycle-as-a-whole.  This entry shows who called the
+ cycle (as parents) and the members of the cycle (as children.)
+ The `+' recursive calls entry shows the number of function calls that
+ were internal to the cycle, and the calls entry for each member shows,
+ for that member, how many times it was called from other members of
+ the cycle.
+
+Copyright (C) 2012-2024 Free Software Foundation, Inc.
+
+Copying and distribution of this file, with or without modification,
+are permitted in any medium without royalty provided the copyright
+notice and this notice are preserved.
+
+Index by function name
+
+  [31] KLTChangeTCPyramid     [79] _KLTFreePyramid        [70] _printFeatureBin
+  [24] KLTCountRemainingFeatures [84] _KLTGetKernelWidths [71] _printFeatureTxt
+  [32] KLTCreateFeatureList   [15] _KLTSelectGoodFeatures [88] _printHeader
+  [33] KLTCreateFeatureTable  [20] _KLTToFloatImage       [81] _printInteger
+  [34] KLTCreateTrackingContext [66] _allocateFloatWindow [82] _printNhyphens
+  [23] KLTExtractFeatureHistory [19] _compute2by1ErrorVector [89] _printSetupBin
+  [35] KLTFreeFeatureList     [13] _compute2by2GradientMatrix [90] _printSetupTxt
+  [36] KLTFreeFeatureTable    [10] _computeGradientSum    [91] _printShutdown
+  [37] KLTFreeTrackingContext [12] _computeIntensityDifference [92] _pyramidSigma
+  [14] KLTSelectGoodFeatures  [77] _computeKernels        [21] _quicksort
+  [25] KLTStoreFeatureList     [6] _convolveImageHoriz    [67] _solveEquation
+   [2] KLTTrackFeatures        [5] _convolveImageVert     [22] _sortPointList
+  [38] KLTUpdateTCBorder       [3] _convolveSeparate      [69] _sumAbsFloatWindow
+  [16] KLTWriteFeatureListToPPM [85] _createArray2D        [7] _trackFeature
+  [30] KLTWriteFeatureTable   [86] _enforceMinimumDistance [39] count_image_files
+   [4] _KLTComputeGradients   [75] _fillFeaturemap        [26] pgmRead
+  [11] _KLTComputePyramid     [87] _findStringWidth       [27] pgmReadFile
+  [80] _KLTComputeSmoothSigma [76] _getNextString         [28] pgmReadHeader
+   [8] _KLTComputeSmoothedImage [9] _interpolate          [29] pnmReadHeader
+  [74] _KLTCreateFloatImage   [83] _isCharInString        [17] ppmWrite
+  [78] _KLTCreatePyramid      [68] _minEigenvalue         [18] ppmWriteFileRGB
+  [73] _KLTFreeFloatImage     [72] _outOfBounds
