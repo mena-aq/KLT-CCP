@@ -14,6 +14,7 @@ saved to a text file; each feature list is also written to a PPM file.
 #include "pnmio.h"
 #include "klt.h"
 
+#include "trackFeatures_acc.h"  
 
 // Function to count image files in dataset folder 
 int count_image_files(const char* folder_path) {
@@ -39,12 +40,29 @@ int count_image_files(const char* folder_path) {
   return count;
 }
 
+// Debug: Print what's defined
+#ifdef KLT_USE_OPENACC
+  #define USE_OPENACC 1
+#else
+  #define USE_OPENACC 0
+#endif
+
 #ifdef WIN32
 int RunExample3()
 #else
 int main(int argc, char *argv[])
 #endif
 {
+
+  printf("USE_OPENACC = %d\n", USE_OPENACC);
+  printf("KLT_USE_OPENACC defined: %d\n", 
+  #ifdef KLT_USE_OPENACC
+      1
+  #else
+      0
+  #endif
+  );
+
   unsigned char *img1, *img2;
   char fnamein[100], fnameout[100];
   char dataset_folder[200] = "../../data/dataset3"; // default folder
@@ -67,6 +85,9 @@ int main(int argc, char *argv[])
 
   // count the number of image files in the dataset folder
   nFrames = count_image_files(dataset_folder);
+  //for debug change nframe
+  //nFrames = 10;
+
   if (nFrames <= 0) {
     printf("Error: No image files found in %s or cannot access folder\n", dataset_folder);
     return -1;
@@ -91,11 +112,20 @@ int main(int argc, char *argv[])
 
   // Start timing the tracking loop
   clock_t start_time = clock();
+
+#if USE_OPENACC
+    initializeOpenACCBuffers(ncols,nrows,(int)tc->subsampling,tc->nPyramidLevels);
+#endif
   
   for (i = 1 ; i < nFrames ; i++)  {
     sprintf(fnamein, "%s/img%d.pgm", dataset_folder, i);
     pgmReadFile(fnamein, img2, &ncols, &nrows);
+#if USE_OPENACC
+    KLTTrackFeaturesACC(tc, img1, img2, ncols, nrows, fl);
+#else
     KLTTrackFeatures(tc, img1, img2, ncols, nrows, fl);
+#endif
+
 #ifdef REPLACE
     KLTReplaceLostFeatures(tc, img2, ncols, nrows, fl);
 #endif
@@ -103,6 +133,10 @@ int main(int argc, char *argv[])
     sprintf(fnameout, "%s/feat%d.ppm", output_folder, i);
     KLTWriteFeatureListToPPM(fl, img2, ncols, nrows, fnameout);
   }
+
+#if USE_OPENACC
+  cleanupOpenACCResources();
+#endif
   
   // End timing and calculate elapsed time
   clock_t end_time = clock();

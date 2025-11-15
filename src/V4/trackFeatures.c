@@ -16,7 +16,6 @@
 #include "klt.h"
 #include "klt_util.h"	/* _KLT_FloatImage */
 #include "pyramid.h"	/* _KLT_Pyramid */
-#include <float.h>
 
 extern int KLT_verbose;
 
@@ -28,70 +27,6 @@ typedef float *_FloatWindow;
  * Given a point (x,y) in an image, computes the bilinear interpolated 
  * gray-level value of the point in the image.  
  */
-
-static void verifyPyramidContents(const char* name, _KLT_Pyramid pyramid) {
-    printf("=== Verifying %s Pyramid ===\n", name);
-    
-    if (pyramid == NULL) {
-        printf("  ERROR: Pyramid is NULL\n");
-        printf("=== End %s Pyramid Verification ===\n\n", name);
-        return;
-    }
-    
-    printf("  Pyramid info: nLevels=%d, subsampling=%d\n", 
-           pyramid->nLevels, pyramid->subsampling);
-    
-    for (int level = 0; level < pyramid->nLevels; level++) {
-        _KLT_FloatImage img = pyramid->img[level];
-        if (img == NULL) {
-            printf("Level %d: ERROR - image is NULL\n", level);
-            continue;
-        }
-        
-        int ncols = pyramid->ncols[level];
-        int nrows = pyramid->nrows[level];
-        size_t level_size = (size_t)ncols * (size_t)nrows;
-        float *level_data = img->data;
-        
-        // Print level info and sample data
-        printf("Level %d (%dx%d):\n", level, ncols, nrows);
-        
-        // Print first row
-        printf("  First row: ");
-        for (int x = 0; x < (ncols < 10 ? ncols : 10); x++) {
-            printf("%6.1f ", level_data[x]);
-        }
-        printf("\n");
-        
-        // Print center region (if image is large enough)
-        if (nrows > 5 && ncols > 5) {
-            int center_y = nrows / 2;
-            int center_x = ncols / 2;
-            printf("  Center [%d,%d]: ", center_y, center_x);
-            for (int dx = -2; dx <= 2; dx++) {
-                int x = center_x + dx;
-                if (x >= 0 && x < ncols) {
-                    float val = level_data[center_y * ncols + x];
-                    printf("%6.1f ", val);
-                }
-            }
-            printf("\n");
-        }
-        
-        // Check for all zeros (might indicate a problem)
-        int zero_count = 0;
-        float min_val = FLT_MAX, max_val = -FLT_MAX;
-        for (size_t i = 0; i < level_size; i++) {
-            if (level_data[i] == 0.0f) zero_count++;
-            if (level_data[i] < min_val) min_val = level_data[i];
-            if (level_data[i] > max_val) max_val = level_data[i];
-        }
-        
-        printf("  Stats: zeros=%d/%zu (%.1f%%), min=%.2f, max=%.2f\n",
-               zero_count, level_size, (100.0f * zero_count) / level_size, min_val, max_val);
-    }
-    printf("=== End %s Pyramid Verification ===\n\n", name);
-}
 
 static float _interpolate(
   float x, 
@@ -1364,9 +1299,7 @@ void KLTTrackFeatures(
 		_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg1);
 		pyramid1 = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
 		_KLTComputePyramid(floatimg1, pyramid1, tc->pyramid_sigma_fact);
-		
-    verifyPyramidContents("pyramid1", pyramid1);
-    pyramid1_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
+		pyramid1_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
 		pyramid1_grady = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
 		for (i = 0 ; i < tc->nPyramidLevels ; i++)
 			_KLTComputeGradients(pyramid1->img[i], tc->grad_sigma, 
@@ -1374,18 +1307,12 @@ void KLTTrackFeatures(
 			pyramid1_grady->img[i]);
 	}
 
-  verifyPyramidContents("image 1 GradX" ,pyramid1_gradx);
-  verifyPyramidContents("image 1 GradY" ,pyramid1_grady);
-
 	/* Do the same thing with second image */
 	floatimg2 = _KLTCreateFloatImage(ncols, nrows);
 	_KLTToFloatImage(img2, ncols, nrows, tmpimg);
 	_KLTComputeSmoothedImage(tmpimg, _KLTComputeSmoothSigma(tc), floatimg2);
 	pyramid2 = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
 	_KLTComputePyramid(floatimg2, pyramid2, tc->pyramid_sigma_fact);
-
-  verifyPyramidContents("pyramid2", pyramid2);
-
 	pyramid2_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
 	pyramid2_grady = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
 	for (i = 0 ; i < tc->nPyramidLevels ; i++)
@@ -1393,8 +1320,6 @@ void KLTTrackFeatures(
 		pyramid2_gradx->img[i],
 		pyramid2_grady->img[i]);
 
-  verifyPyramidContents("image 2 GradX" ,pyramid2_gradx);
-  verifyPyramidContents("image 2 GradY" ,pyramid2_grady);
 	/* Write internal images */
 	if (tc->writeInternalImages)  {
 		char fname[80];

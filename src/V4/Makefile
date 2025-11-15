@@ -1,4 +1,9 @@
-CC = gcc
+######################################################################
+# Build configuration
+# COMPILER = gcc or nvc
+# MODE = cpu or acc
+COMPILER = gcc
+MODE = cpu
 
 ######################################################################
 # -DNDEBUG prevents the assert() statements from being included in 
@@ -14,101 +19,132 @@ FLAG1 = -DNDEBUG
 # reason you are unhappy with the special routine.
 # FLAG2 = -DKLT_USE_QSORT
 
-# CPU flags
-CPU_CFLAGS = $(FLAG1) $(FLAG2) -pg 
-CPU_CC = gcc
+######################################################################
+# Compiler and flags configuration
+ifeq ($(COMPILER)-$(MODE),nvc-acc)
+  CC = nvc
+  CFLAGS = $(FLAG1) $(FLAG2) -pg -acc -gpu=managed -Minfo=accel -DKLT_USE_OPENACC -DKLT_OPENACC_NVC
+  ACC_SUFFIX = _acc
+else ifeq ($(COMPILER)-$(MODE),gcc-acc)
+  CC = gcc
+  CFLAGS = $(FLAG1) $(FLAG2) -pg -fopenacc -fopt-info-optimized -DKLT_USE_OPENACC -DKLT_OPENACC_GCC
+  ACC_SUFFIX = _acc
+else
+  # Default to GCC CPU mode
+  CC = gcc
+  CFLAGS = $(FLAG1) $(FLAG2) -pg
+  ACC_SUFFIX =
+endif
 
-# GPU flags 
-GPU_CFLAGS = $(FLAG1) $(FLAG2) -acc -gpu=cc86 -Minfo=accel -fast
-GPU_LDFLAGS = -acc -gpu=cc70
-GPU_CC = nvc
-
+######################################################################
+# Source files
 EXAMPLES = example3.c
-ARCH = convolve.c error.c pnmio.c pyramid.c selectGoodFeatures.c \
-       storeFeatures.c trackFeatures.c klt.c klt_util.c writeFeatures.c
-LIB = -L/usr/local/lib -L/usr/lib
 
+# dataset
 DATASET ?= dataset3
+
+# Common files (always included)
+COMMON_SRCS = error.c pnmio.c pyramid.c selectGoodFeatures.c \
+              storeFeatures.c klt.c klt_util.c writeFeatures.c
+
+# CPU-specific files (always included for CPU, also for ACC as fallback)
+CPU_SRCS = convolve.c trackFeatures.c
+
+# ACC-specific files (only included for ACC builds)
+ACC_SRCS = convolve$(ACC_SUFFIX).c trackFeatures$(ACC_SUFFIX).c
+
+# Select source files based on mode
+ifeq ($(MODE),acc)
+  # ACC builds use ACC versions where available, but include all CPU sources too
+  ARCH = $(ACC_SRCS) $(CPU_SRCS) $(COMMON_SRCS)
+else
+  # CPU builds only use CPU sources
+  ARCH = $(CPU_SRCS) $(COMMON_SRCS)
+endif
+
+LIB = -L/usr/local/lib -L/usr/lib -lm
 
 .SUFFIXES:  .c .o
 
-# Default target - build both CPU and GPU
-all: build
+all:  lib $(EXAMPLES:.c=)
 
-######################################################################
-# BUILD RULES
-######################################################################
+.c.o:
+	$(CC) -c $(CFLAGS) $<
 
-# Build library for CPU
-lib_cpu: 
-	$(foreach src, $(ARCH), $(CPU_CC) -c $(CPU_CFLAGS) $(src) -o $(src:.c=.o);)
-	rm -f libklt_cpu.a
-	ar ruv libklt_cpu.a $(ARCH:.c=.o)
+lib: $(ARCH:.c=.o)
+	rm -f libklt.a
+	ar ruv libklt.a $(ARCH:.c=.o)
 	rm -f *.o
 
-# Build library for GPU
-lib_gpu: 
-	$(foreach src, $(ARCH), $(GPU_CC) -c $(GPU_CFLAGS) $(src) -o $(src:.c=.o);)
-	rm -f libklt_gpu.a
-	ar ruv libklt_gpu.a $(ARCH:.c=.o)
-	rm -f *.o
+example3: libklt.a
+	$(CC) -O3 $(CFLAGS) -o $@ $@.c -L. -lklt $(LIB)
 
-# CPU executable
-example3_cpu: lib_cpu
-	$(CPU_CC) -O3 $(CPU_CFLAGS) -o $@ example3.c -L. -lklt_cpu $(LIB) -lm
-	@echo "CPU build complete using gcc compiler"
+# Predefined configurations
+gcc-cpu:
+	$(MAKE) COMPILER=gcc MODE=cpu all
 
-# GPU executable
-example3_gpu: lib_gpu
-	$(GPU_CC) -O3 $(GPU_CFLAGS) $(GPU_LDFLAGS) -o $@ example3.c -L. -lklt_gpu $(LIB) -lm
-	@echo "GPU build complete using nvc compiler"
+gcc-acc:
+	$(MAKE) COMPILER=gcc MODE=acc all
 
-# Build both CPU and GPU versions
-build: example3_cpu example3_gpu
-	@echo "Both CPU and GPU versions built"
+nvc-acc:
+	$(MAKE) COMPILER=nvc MODE=acc all
 
+# Run targets
+run: example3
+	./example3 $(DATASET)
 
-# Run CPU
-run_cpu: example3_cpu
-	./example3_cpu $(DATASET)
+run-gcc-cpu: gcc-cpu
+	$(MAKE) COMPILER=gcc MODE=cpu run
 
-# Run GPU
-run_gpu: example3_gpu
-	./example3_gpu $(DATASET)
+run-gcc-acc: gcc-acc
+	GOACC_DEBUG=1 ./example3 $(DATASET)
 
-# Run both and compare
-run: build
-	@echo "=== Running CPU version ==="
-	@./example3_cpu $(DATASET) > /dev/null 2>&1
-	@echo "=== Running GPU version ==="  
-	@./example3_gpu $(DATASET) > /dev/null 2>&1
+run-nvc-acc: nvc-acc
+	$(MAKE) COMPILER=nvc MODE=acc run
 
+# Valgrind debugging targets
+valgrind: example3
+	valgrind --tool=memcheck --leak-check=full --track-origins=yes --show-leak-kinds=all ./example3 $(DATASET)
 
-# CPU profiling
-profile_cpu: example3_cpu
-	./example3_cpu $(DATASET)
-	gprof ./example3_cpu > profile_cpu.txt
-	gprof ./example3_cpu | python3 gprof2dot.py | dot -Tpng -o callgraph_cpu.png
-	@echo "CPU profiling complete: profile_cpu.txt and callgraph_cpu.png generated"
+valgrind-gcc-cpu: gcc-cpu
+	$(MAKE) COMPILER=gcc MODE=cpu valgrind
 
-# GPU profiling
-profile_gpu: example3_gpu
-	nsys profile --stats=true ./example3_gpu $(DATASET)
-	@echo "GPU profiling complete with NVIDIA Nsight Systems"
+valgrind-gcc-acc: gcc-acc
+	$(MAKE) COMPILER=gcc MODE=acc valgrind
 
+valgrind-nvc-acc: nvc-acc
+	$(MAKE) COMPILER=nvc MODE=acc valgrind
 
-# Test GPU compilation with info
-test-gpu-compile:
-	@echo "=== Testing GPU compilation with OpenACC info ==="
-	$(GPU_CC) $(GPU_CFLAGS) -c example3.c -o example3_gpu_test.o
-	rm -f example3_gpu_test.o
+# Configuration info
+config:
+	@echo "Build Configuration:"
+	@echo "  COMPILER: $(COMPILER)"
+	@echo "  MODE:     $(MODE)"
+	@echo "  CC:       $(CC)"
+	@echo "  CFLAGS:   $(CFLAGS)"
+	@echo "  Sources:  $(ARCH)"
 
-
-depend:
-	makedepend $(ARCH) $(EXAMPLES)
-
+# Clean
 clean:
-	rm -f *.o *.a *.tar *.tar.gz \
-	      feat*.ppm features.ft features.txt gmon.out profile*.txt callgraph*.png output/* \
-	      example3_cpu example3_gpu libklt_cpu.a libklt_gpu.a
+	rm -f *.o *.a $(EXAMPLES:.c=) *.tar *.tar.gz libklt.a \
+	      feat*.ppm features.ft features.txt gmon.out profile.txt callgraph.png output/*
 	rm -rf output
+
+# Help
+help:
+	@echo "Available build configurations:"
+	@echo "  gcc-cpu    - GCC compiler, CPU version (original code)"
+	@echo "  gcc-acc    - GCC compiler, OpenACC version"
+	@echo "  nvc-acc    - NVIDIA compiler, OpenACC version"
+	@echo ""
+	@echo "Run targets:"
+	@echo "  run-gcc-cpu - Build and run GCC CPU version"
+	@echo "  run-gcc-acc - Build and run GCC OpenACC version"  
+	@echo "  run-nvc-acc - Build and run NVIDIA OpenACC version"
+	@echo ""
+	@echo "Valgrind debugging targets:"
+	@echo "  valgrind-gcc-cpu - Build and run GCC CPU version with valgrind"
+	@echo "  valgrind-gcc-acc - Build and run GCC OpenACC version with valgrind"
+	@echo "  valgrind-nvc-acc - Build and run NVIDIA OpenACC version with valgrind"
+	@echo ""
+	@echo "Note: ACC builds include both ACC-optimized and CPU fallback sources"

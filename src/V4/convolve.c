@@ -13,13 +13,6 @@
 #include "convolve.h"
 #include "klt_util.h"   /* printing */
 
-#define MAX_KERNEL_WIDTH 	71
-
-
-typedef struct  {
-  int width;
-  float data[MAX_KERNEL_WIDTH];
-}  ConvolutionKernel;
 
 /* Kernels */
 static ConvolutionKernel gauss_kernel;
@@ -57,7 +50,7 @@ void _KLTToFloatImage(
  * _computeKernels
  */
 
-static void _computeKernels(
+void _computeKernels(
   float sigma,
   ConvolutionKernel *gauss,
   ConvolutionKernel *gaussderiv)
@@ -131,81 +124,116 @@ void _KLTGetKernelWidths(
 
 
 /*********************************************************************
- * _convolveImageHoriz (OpenACC version)
- *********************************************************************/
+ * _convolveImageHoriz
+ */
+
 static void _convolveImageHoriz(
   _KLT_FloatImage imgin,
   ConvolutionKernel kernel,
   _KLT_FloatImage imgout)
 {
-  int radius = kernel.width / 2;
-  int ncols = imgin->ncols;
-  int nrows = imgin->nrows;
-  int kernel_width = kernel.width;
+  float *ptrrow = imgin->data;           /* Points to row's first pixel */
+  register float *ptrout = imgout->data, /* Points to next output pixel */
+    *ppp;
+  register float sum;
+  register int radius = kernel.width / 2;
+  register int ncols = imgin->ncols, nrows = imgin->nrows;
+  register int i, j, k;
 
-  float *in_data = imgin->data;
-  float *out_data = imgout->data;
+  /* Kernel width must be odd */
+  assert(kernel.width % 2 == 1);
 
-  /* Parallelize over rows */
-  #pragma acc parallel loop gang copyin(in_data[0:nrows*ncols], kernel) \
-                         copyout(out_data[0:nrows*ncols])
-  for (int j = 0; j < nrows; j++) {
+  /* Must read from and write to different images */
+  assert(imgin != imgout);
+
+  /* Output image must be large enough to hold result */
+  assert(imgout->ncols >= imgin->ncols);
+  assert(imgout->nrows >= imgin->nrows);
+
+  /* For each row, do ... */
+  for (j = 0 ; j < nrows ; j++)  {
+
     /* Zero leftmost columns */
-    for (int i = 0; i < radius; i++)
-      out_data[j*ncols + i] = 0.0f;
+    for (i = 0 ; i < radius ; i++)
+      *ptrout++ = 0.0;
 
-    /* Convolve middle columns */
-    for (int i = radius; i < ncols - radius; i++) {
-      float sum = 0.0f;
-      for (int k = 0; k < kernel_width; k++)
-        sum += in_data[j*ncols + i - radius + k] * kernel.data[kernel_width - 1 - k];
-      out_data[j*ncols + i] = sum;
+    /* Convolve middle columns with kernel */
+    for ( ; i < ncols - radius ; i++)  {
+      ppp = ptrrow + i - radius;
+      sum = 0.0;
+      for (k = kernel.width-1 ; k >= 0 ; k--)
+        sum += *ppp++ * kernel.data[k];
+      *ptrout++ = sum;
     }
 
     /* Zero rightmost columns */
-    for (int i = ncols - radius; i < ncols; i++)
-      out_data[j*ncols + i] = 0.0f;
+    for ( ; i < ncols ; i++)
+      *ptrout++ = 0.0;
+
+    ptrrow += ncols;
   }
 }
 
 
 /*********************************************************************
- * _convolveImageVert (OpenACC version)
- *********************************************************************/
+ * _convolveImageVert
+ */
+
 static void _convolveImageVert(
   _KLT_FloatImage imgin,
   ConvolutionKernel kernel,
   _KLT_FloatImage imgout)
 {
-  int radius = kernel.width / 2;
-  int ncols = imgin->ncols;
-  int nrows = imgin->nrows;
-  int kernel_width = kernel.width;
+  float *ptrcol = imgin->data;            /* Points to row's first pixel */
+  register float *ptrout = imgout->data,  /* Points to next output pixel */
+    *ppp;
+  register float sum;
+  register int radius = kernel.width / 2;
+  register int ncols = imgin->ncols, nrows = imgin->nrows;
+  register int i, j, k;
 
-  float *in_data = imgin->data;
-  float *out_data = imgout->data;
+  /* Kernel width must be odd */
+  assert(kernel.width % 2 == 1);
 
-  /* Parallelize over columns */
-  #pragma acc parallel loop gang copyin(in_data[0:nrows*ncols], kernel) \
-                         copyout(out_data[0:nrows*ncols])
-  for (int i = 0; i < ncols; i++) {
+  /* Must read from and write to different images */
+  assert(imgin != imgout);
+
+  /* Output image must be large enough to hold result */
+  assert(imgout->ncols >= imgin->ncols);
+  assert(imgout->nrows >= imgin->nrows);
+
+  /* For each column, do ... */
+  for (i = 0 ; i < ncols ; i++)  {
+
     /* Zero topmost rows */
-    for (int j = 0; j < radius; j++)
-      out_data[j*ncols + i] = 0.0f;
+    for (j = 0 ; j < radius ; j++)  {
+      *ptrout = 0.0;
+      ptrout += ncols;
+    }
 
-    /* Convolve middle rows */
-    for (int j = radius; j < nrows - radius; j++) {
-      float sum = 0.0f;
-      for (int k = 0; k < kernel_width; k++)
-        sum += in_data[(j - radius + k)*ncols + i] * kernel.data[kernel_width - 1 - k];
-      out_data[j*ncols + i] = sum;
+    /* Convolve middle rows with kernel */
+    for ( ; j < nrows - radius ; j++)  {
+      ppp = ptrcol + ncols * (j - radius);
+      sum = 0.0;
+      for (k = kernel.width-1 ; k >= 0 ; k--)  {
+        sum += *ppp * kernel.data[k];
+        ppp += ncols;
+      }
+      *ptrout = sum;
+      ptrout += ncols;
     }
 
     /* Zero bottommost rows */
-    for (int j = nrows - radius; j < nrows; j++)
-      out_data[j*ncols + i] = 0.0f;
+    for ( ; j < nrows ; j++)  {
+      *ptrout = 0.0;
+      ptrout += ncols;
+    }
+
+    ptrcol++;
+    ptrout -= nrows * ncols - 1;
   }
 }
+
 
 /*********************************************************************
  * _convolveSeparate

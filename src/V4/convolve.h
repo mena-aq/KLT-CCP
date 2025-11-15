@@ -8,6 +8,14 @@
 #include "klt.h"
 #include "klt_util.h"
 
+#define MAX_KERNEL_WIDTH 71
+
+typedef struct {
+  int width;
+  float data[MAX_KERNEL_WIDTH];
+} ConvolutionKernel;
+
+
 void _KLTToFloatImage(
   KLT_PixelType *img,
   int ncols, int nrows,
@@ -28,5 +36,11 @@ void _KLTComputeSmoothedImage(
   _KLT_FloatImage img,
   float sigma,
   _KLT_FloatImage smooth);
+
+void _computeKernels(
+  float sigma,
+  ConvolutionKernel *gauss,
+  ConvolutionKernel *gaussderiv
+);
 
 #endif
