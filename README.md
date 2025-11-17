@@ -29,7 +29,7 @@ make run DATASET=dataset1|dataset2|dataset3
 make clean
 ```
 
-## Running V2 / V3
+## Running V2 / V3 / V4
 
 ### CPU:
 
