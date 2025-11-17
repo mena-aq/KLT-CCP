@@ -30,6 +30,14 @@ LIB = -L/usr/local/lib -L/usr/lib
 
 DATASET ?= dataset3
 
+VALGRIND_OPTS = --tool=memcheck \
+                --leak-check=full \
+                --show-leak-kinds=all \
+                --track-origins=yes \
+                --verbose \
+                --error-exitcode=1 \
+                --suppressions=/dev/null
+
 .SUFFIXES:  .c .o
 
 # Default target - build both CPU and GPU
@@ -112,3 +120,15 @@ clean:
 	      feat*.ppm features.ft features.txt gmon.out profile*.txt callgraph*.png output/* \
 	      example3_cpu example3_gpu libklt_cpu.a libklt_gpu.a
 	rm -rf output
+
+
+# Quick memcheck for CPU (errors only)
+memcheck_quick_cpu: example3_cpu
+	@echo "=== Quick Valgrind Memcheck CPU (errors only) ==="
+	valgrind --tool=memcheck --leak-check=yes --error-exitcode=1 --quiet ./example3_cpu $(DATASET)
+
+# Quick memcheck for GPU (errors only)
+memcheck_quick_gpu: example3_gpu
+	@echo "=== Quick Valgrind Memcheck GPU (errors only) ==="
+	@echo "Note: GPU kernels will run on CPU under valgrind"
+	valgrind --tool=memcheck --leak-check=yes --error-exitcode=1 --quiet ./example3_gpu $(DATASET)
