@@ -1365,7 +1365,7 @@ void KLTTrackFeatures(
 		pyramid1 = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
 		_KLTComputePyramid(floatimg1, pyramid1, tc->pyramid_sigma_fact);
 		
-    verifyPyramidContents("pyramid1", pyramid1);
+    //verifyPyramidContents("pyramid1", pyramid1);
     pyramid1_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
 		pyramid1_grady = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
 		for (i = 0 ; i < tc->nPyramidLevels ; i++)
@@ -1374,8 +1374,8 @@ void KLTTrackFeatures(
 			pyramid1_grady->img[i]);
 	}
 
-  verifyPyramidContents("image 1 GradX" ,pyramid1_gradx);
-  verifyPyramidContents("image 1 GradY" ,pyramid1_grady);
+  //verifyPyramidContents("image 1 GradX" ,pyramid1_gradx);
+  //verifyPyramidContents("image 1 GradY" ,pyramid1_grady);
 
 	/* Do the same thing with second image */
 	floatimg2 = _KLTCreateFloatImage(ncols, nrows);
@@ -1384,7 +1384,7 @@ void KLTTrackFeatures(
 	pyramid2 = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
 	_KLTComputePyramid(floatimg2, pyramid2, tc->pyramid_sigma_fact);
 
-  verifyPyramidContents("pyramid2", pyramid2);
+  //verifyPyramidContents("pyramid2", pyramid2);
 
 	pyramid2_gradx = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
 	pyramid2_grady = _KLTCreatePyramid(ncols, nrows, (int) subsampling, tc->nPyramidLevels);
@@ -1393,8 +1393,8 @@ void KLTTrackFeatures(
 		pyramid2_gradx->img[i],
 		pyramid2_grady->img[i]);
 
-  verifyPyramidContents("image 2 GradX" ,pyramid2_gradx);
-  verifyPyramidContents("image 2 GradY" ,pyramid2_grady);
+  //verifyPyramidContents("image 2 GradX" ,pyramid2_gradx);
+  //verifyPyramidContents("image 2 GradY" ,pyramid2_grady);
 	/* Write internal images */
 	if (tc->writeInternalImages)  {
 		char fname[80];

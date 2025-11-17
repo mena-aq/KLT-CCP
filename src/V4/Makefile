@@ -93,7 +93,7 @@ profile_cpu: example3_cpu
 
 # GPU profiling
 profile_gpu: example3_gpu
-	nsys profile --stats=true ./example3_gpu $(DATASET)
+	nsys profile --stats=true ./example3_gpu $(DATASET) > profile_gpu.txt
 	@echo "GPU profiling complete with NVIDIA Nsight Systems"
 
 
