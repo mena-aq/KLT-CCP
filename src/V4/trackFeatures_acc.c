@@ -34,79 +34,38 @@ typedef struct {
     size_t total_size;
 } FlatPyramid;
 
+typedef struct {
+    float gxx, gxy, gyy;
+} GradientMatrix;
+
+typedef struct {
+    float ex, ey;
+} ErrorVector;
+
+typedef struct {
+    float dx, dy;
+    int status;
+} SolutionResult;
+
 // Global pyramid metadata
-static FlatPyramid pyramid_meta = {0};
-static bool pyramid_meta_initialized = false;
+FlatPyramid pyramid_meta = {0};
+bool pyramid_meta_initialized = false;
 
 // Global reusable buffers
-static float *pyramid1_flat = NULL;
-static float *pyramid1_gradx_flat = NULL;
-static float *pyramid1_grady_flat = NULL;
-static float *pyramid2_flat = NULL;
-static float *pyramid2_gradx_flat = NULL;
-static float *pyramid2_grady_flat = NULL;
+float *pyramid1_flat = NULL;
+float *pyramid1_gradx_flat = NULL;
+float *pyramid1_grady_flat = NULL;
+float *pyramid2_flat = NULL;
+float *pyramid2_gradx_flat = NULL;
+float *pyramid2_grady_flat = NULL;
 
-static float *img1_flat = NULL, *img2_flat = NULL;
-static float *smooth_img1_flat = NULL, *smooth_img2_flat = NULL;
-static bool device_buffs_allocated = false;
+float *img1_flat = NULL;    
+float *img2_flat = NULL;   
+float *smooth_img1_flat = NULL, *smooth_img2_flat = NULL;
+bool device_buffs_allocated = false;
 
-static bool first_frame = true;
-static int frame_count = 0;
-
-// Add this debug function to compare two pyramids side by side
-static void comparePyramidAreas(const char* nameA, float* pyramidA, const char* nameB, float* pyramidB,
-                                int nLevels, int subsampling, int base_ncols, int base_nrows) {
-    printf("=== Comparing %s and %s Pyramids ===\n", nameA, nameB);
-
-    int current_ncols = base_ncols;
-    int current_nrows = base_nrows;
-    size_t offsetA = 0, offsetB = 0;
-
-    for (int level = 0; level < nLevels; level++) {
-        size_t level_size = (size_t)current_ncols * (size_t)current_nrows;
-        float *dataA = pyramidA + offsetA;
-        float *dataB = pyramidB + offsetB;
-
-        printf("Level %d (%dx%d):\n", level, current_ncols, current_nrows);
-
-        // Compare first row
-        printf("  First row (%s): ", nameA);
-        for (int x = 0; x < (current_ncols < 10 ? current_ncols : 10); x++)
-            printf("%6.1f ", dataA[x]);
-        printf("\n  First row (%s): ", nameB);
-        for (int x = 0; x < (current_ncols < 10 ? current_ncols : 10); x++)
-            printf("%6.1f ", dataB[x]);
-        printf("\n");
-
-        // Compare center region
-        if (current_nrows > 5 && current_ncols > 5) {
-            int center_y = current_nrows / 2;
-            int center_x = current_ncols / 2;
-            printf("  Center [%d,%d] (%s): ", center_y, center_x, nameA);
-            for (int dx = -2; dx <= 2; dx++) {
-                int x = center_x + dx;
-                if (x >= 0 && x < current_ncols)
-                    printf("%6.1f ", dataA[center_y * current_ncols + x]);
-            }
-            printf("\n  Center [%d,%d] (%s): ", center_y, center_x, nameB);
-            for (int dx = -2; dx <= 2; dx++) {
-                int x = center_x + dx;
-                if (x >= 0 && x < current_ncols)
-                    printf("%6.1f ", dataB[center_y * current_ncols + x]);
-            }
-            printf("\n");
-        }
-
-        offsetA += level_size;
-        offsetB += level_size;
-        if (level < nLevels - 1) {
-            current_ncols /= subsampling;
-            current_nrows /= subsampling;
-        }
-    }
-    printf("=== End Pyramid Comparison ===\n\n");
-}
-
+bool first_frame = true;
+int frame_count = 0;
 
 static void verifyPyramidContents(const char* name, float* pyramid, int nLevels, int subsampling, 
                                   int base_ncols, int base_nrows) {
@@ -228,6 +187,7 @@ int getPyramidLevelRows(int level) {
     return pyramid_meta.nrows[level];
 }
 
+#pragma acc routine seq
 static float _sumAbsFloatWindow(
   FloatWindow fw,
   int width,
@@ -273,7 +233,7 @@ static float _interpolate(
 /*********************************************************************
  * _computeIntensityDifference - OpenACC optimized
  */
-
+//#pragma acc routine seq  
 static void _computeIntensityDifference(
   const float *img1, int img1_ncols, int img1_nrows,
   const float *img2, int img2_ncols, int img2_nrows,
@@ -284,8 +244,7 @@ static void _computeIntensityDifference(
 {
   int hw = width/2, hh = height/2;
 
-  //#pragma acc parallel loop collapse(2) \
-              present(img1, img2, imgdiff)
+  #pragma acc loop collapse(2) 
   for (int j = -hh; j <= hh; j++) {
     for (int i = -hw; i <= hw; i++) {
       int idx = (j + hh) * width + (i + hw);
@@ -300,7 +259,7 @@ static void _computeIntensityDifference(
 /*********************************************************************
  * _computeGradientSum - OpenACC optimized
  */
-
+//#pragma acc routine seq  
 static void _computeGradientSum(
   const float *gradx1, int gx1_ncols, int gx1_nrows,
   const float *grady1, int gy1_ncols, int gy1_nrows,
@@ -314,8 +273,7 @@ static void _computeGradientSum(
 {
   int hw = width/2, hh = height/2;
 
-  //#pragma acc parallel loop collapse(2) \
-              present(gradx1, grady1, gradx2, grady2, gradx, grady)
+  #pragma acc loop collapse(2) 
   for (int j = -hh; j <= hh; j++) {
     for (int i = -hw; i <= hw; i++) {
       int idx = (j + hh) * width + (i + hw);
@@ -329,10 +287,12 @@ static void _computeGradientSum(
   }
 }
 
+
+
 /*********************************************************************
  * _compute2by2GradientMatrix - OpenACC optimized
  */
-
+#pragma acc routine seq 
 static void _compute2by2GradientMatrix(
   FloatWindow gradx,
   FloatWindow grady,
@@ -341,7 +301,7 @@ static void _compute2by2GradientMatrix(
 {
   float local_gxx = 0.0, local_gxy = 0.0, local_gyy = 0.0;
 
-  #pragma acc parallel loop reduction(+:local_gxx,local_gxy,local_gyy) present(gradx, grady)
+  #pragma acc loop reduction(+:local_gxx,local_gxy,local_gyy)
   for (int i = 0; i < width * height; i++) {
     float gx = gradx[i];
     float gy = grady[i];
@@ -354,10 +314,31 @@ static void _compute2by2GradientMatrix(
   *gyy = local_gyy;
 }
 
+#pragma acc routine seq
+static GradientMatrix _compute2by2GradientMatrixACC(
+    FloatWindow gradx, FloatWindow grady, int width, int height)
+{
+    float local_gxx = 0.0, local_gxy = 0.0, local_gyy = 0.0;
+    GradientMatrix result = {0};
+
+    #pragma acc loop reduction(+:local_gxx,local_gxy,local_gyy)
+    for (int i = 0; i < width * height; i++) {
+        float gx = gradx[i];
+        float gy = grady[i];
+        local_gxx += gx * gx;
+        local_gxy += gx * gy;
+        local_gyy += gy * gy;
+    }
+    result.gxx = local_gxx;
+    result.gxy = local_gxy;
+    result.gyy = local_gyy;
+    return result;
+}
+
 /*********************************************************************
  * _compute2by1ErrorVector - OpenACC optimized
  */
-
+#pragma acc routine seq 
 static void _compute2by1ErrorVector(
   FloatWindow imgdiff,
   FloatWindow gradx,
@@ -368,8 +349,7 @@ static void _compute2by1ErrorVector(
 {
   float local_ex = 0.0, local_ey = 0.0;
   
-  #pragma acc parallel loop reduction(+:local_ex,local_ey) \
-              present(imgdiff, gradx, grady)
+  #pragma acc loop reduction(+:local_ex,local_ey) 
   for (int i = 0; i < width * height; i++) {
     float diff = imgdiff[i];
     local_ex += diff * gradx[i];
@@ -380,11 +360,30 @@ static void _compute2by1ErrorVector(
   *ey = local_ey * step_factor;
 }
 
+#pragma acc routine seq 
+static ErrorVector _compute2by1ErrorVectorACC(
+    FloatWindow imgdiff, FloatWindow gradx, FloatWindow grady,
+    int width, int height, float step_factor)
+{
+    float local_ex = 0.0, local_ey = 0.0;
+    ErrorVector result = {0};
+
+    #pragma acc loop reduction(+:local_ex,local_ey) 
+    for (int i = 0; i < width * height; i++) {
+        float diff = imgdiff[i];
+        local_ex += diff * gradx[i];
+        local_ey += diff * grady[i];
+    }
+    result.ex = local_ex * step_factor;
+    result.ey = local_ey * step_factor;
+    return result;
+}
+
 /*********************************************************************
  * _solveEquation - OpenACC compatible
  */
 
-#pragma acc routine seq
+#pragma acc routine seq 
 static int _solveEquation(
   float gxx, float gxy, float gyy,
   float ex, float ey,
@@ -398,6 +397,22 @@ static int _solveEquation(
   *dx = (gyy * ex - gxy * ey) / det;
   *dy = (gxx * ey - gxy * ex) / det;
   return KLT_TRACKED;
+}
+
+#pragma acc routine seq
+static SolutionResult _solveEquationACC(
+    float gxx, float gxy, float gyy, float ex, float ey, float small)
+{
+    SolutionResult result = {0};
+    float det = gxx * gyy - gxy * gxy;
+    if (det < small) {
+        result.status = KLT_SMALL_DET;
+    } else {
+        result.dx = (gyy * ex - gxy * ey) / det;
+        result.dy = (gxx * ey - gxy * ex) / det;
+        result.status = KLT_TRACKED;
+    }
+    return result;
 }
 
 static KLT_BOOL _outOfBounds(
@@ -432,8 +447,8 @@ static int _trackFeature(
   float small,
   float th,
   float max_residue,
-  int lightininsensitive,
-  int featureIdx)
+  int lightininsensitive
+)
 {
   FloatWindow imgdiff, gradx, grady;
   float gxx, gxy, gyy, ex, ey, dx, dy;
@@ -473,7 +488,7 @@ static int _trackFeature(
         break;
       }
 
-      if (featureIdx==0){
+      //if (featureIdx==0){
         //printf("[_trackFeature] Tracking feature %d at position (%.2f, %.2f) in img1 and (%.2f, %.2f) in img2\n",
                //featureIdx, x1, y1, *x2, *y2);
         //verifyPyramidContents("img1", img1_flat, 1, 1, img1_ncols, img1_nrows);
@@ -482,7 +497,7 @@ static int _trackFeature(
         //verifyPyramidContents("grady1", grady1_flat, 1, 1, gy1_ncols, gy1_nrows);
         //verifyPyramidContents("gradx2", gradx2_flat, 1, 1, gx2_ncols, gx2_nrows);
         //verifyPyramidContents("grady2", grady2_flat, 1, 1, gy2_ncols, gy2_nrows);
-      }
+      //}
 
       // Compute gradient and difference windows
       _computeIntensityDifference(img1_flat, img1_ncols, img1_nrows,
@@ -497,15 +512,28 @@ static int _trackFeature(
                           width, height, gradx, grady);
 
       // Compute matrices
-      _compute2by2GradientMatrix(gradx, grady, width, height, &gxx, &gxy, &gyy);
-      _compute2by1ErrorVector(imgdiff, gradx, grady, width, height, step_factor, &ex, &ey);
+      //_compute2by2GradientMatrix(gradx, grady, width, height, &gxx, &gxy, &gyy);
+      //_compute2by1ErrorVector(imgdiff, gradx, grady, width, height, step_factor, &ex, &ey);
 
       //if (featureIdx==5)
         //printf("[_trackFeature]feature %d gxx=%.6f gxy=%.6f gyy=%.6f ex=%.6f ey=%.6f\n", featureIdx, gxx, gxy, gyy, ex, ey);
 
       // Solve equation
-      status = _solveEquation(gxx, gxy, gyy, ex, ey, small, &dx, &dy);
+      //status = _solveEquation(gxx, gxy, gyy, ex, ey, small, &dx, &dy);
 
+    
+        // Compute matrices 
+        GradientMatrix grad_matrix = _compute2by2GradientMatrixACC(gradx, grady, width, height);
+        ErrorVector error_vec = _compute2by1ErrorVectorACC(imgdiff, gradx, grady, width, height, step_factor);
+
+        // Solve equation
+        SolutionResult solution = _solveEquationACC(grad_matrix.gxx, grad_matrix.gxy, grad_matrix.gyy,
+                                              error_vec.ex, error_vec.ey, small);
+
+      status = solution.status;
+      dx = solution.dx;
+      dy = solution.dy;
+   
       if (status == KLT_SMALL_DET) {
         //printf("[_trackFeature] Dropped: SMALL_DET (small determinant)\n");
         break;
@@ -575,7 +603,14 @@ void initializeOpenACCBuffers(int ncols, int nrows, int subsampling, int nLevels
     img2_flat = (float*)malloc(ncols * nrows * sizeof(float));
     smooth_img1_flat = (float*)malloc(ncols * nrows * sizeof(float));
     smooth_img2_flat = (float*)malloc(ncols * nrows * sizeof(float));
+
+    // Copy pyramid_meta to DEVICE (ONCE at initialization)
+    #pragma acc enter data copyin(pyramid_meta)
+    #pragma acc enter data copyin(pyramid_meta.ncols[0:nLevels])
+    #pragma acc enter data copyin(pyramid_meta.nrows[0:nLevels]) 
+    #pragma acc enter data copyin(pyramid_meta.offsets[0:nLevels])
     
+                        
     // Allocate DEVICE buffers and keep them there
     #pragma acc enter data create( \
         img1_flat[0:ncols*nrows], \
@@ -608,41 +643,22 @@ void KLTTrackFeaturesACC(
 {
 
   float subsampling = (float) tc->subsampling;
-	float xloc, yloc, xlocout, ylocout;
+    float xloc, yloc, xlocout, ylocout;
 	int val;
 	int indx, r;
 
   printf("KLTTrackFeaturesACC called for frame %d\n", frame_count);
 
-  // if (first_frame){
-  //   //initialise buffers
-  //   initializeOpenACCBuffers(ncols,nrows,(int)tc->subsampling,tc->nPyramidLevels);
-  // }
-
-  //#pragma acc data create(img1_flat[0:ncols*nrows], \
-                       img2_flat[0:ncols*nrows]) \
-                  create(smooth_img1_flat[0:ncols*nrows], \
-                         smooth_img2_flat[0:ncols*nrows], \
-                         pyramid1_flat[0:pyramid_meta.total_size], \
-                         pyramid2_flat[0:pyramid_meta.total_size], \
-                         pyramid1_gradx_flat[0:pyramid_meta.total_size], \
-                         pyramid1_grady_flat[0:pyramid_meta.total_size], \
-                         pyramid2_gradx_flat[0:pyramid_meta.total_size], \
-                         pyramid2_grady_flat[0:pyramid_meta.total_size])
   {
     // Process images using FLAT versions
     if (first_frame || !tc->sequentialMode) {
       // Compute pyramid for first image using flat functions
       _KLTToFloatImageACC(img1, ncols, nrows, img1_flat);
 
-      #pragma acc update device(img1_flat[0:ncols*nrows])
-
       _KLTComputeSmoothedImageACC(img1_flat, ncols, nrows,
                                   _KLTComputeSmoothSigma(tc),
                                   smooth_img1_flat, ncols, nrows);
 
-      #pragma acc update device(smooth_img1_flat[0:ncols*nrows])
-      
       computePyramidOpenACC(smooth_img1_flat, ncols, nrows,
                            tc->pyramid_sigma_fact,
                            pyramid1_flat, (int)tc->subsampling, tc->nPyramidLevels);
@@ -654,8 +670,8 @@ void KLTTrackFeaturesACC(
         float *level_img = pyramid1_flat + pyramid_meta.offsets[i];
         float *level_gradx = pyramid1_gradx_flat + pyramid_meta.offsets[i];
         float *level_grady = pyramid1_grady_flat + pyramid_meta.offsets[i];
-        int level_ncols = getPyramidLevelCols(i);
-        int level_nrows = getPyramidLevelRows(i);
+        int level_ncols = pyramid_meta.ncols[i];
+        int level_nrows = pyramid_meta.nrows[i];
         
         _KLTComputeGradientsACC(level_img, level_ncols, level_nrows,
                                 tc->grad_sigma,
@@ -663,10 +679,6 @@ void KLTTrackFeaturesACC(
                                 level_grady, level_ncols, level_nrows);
       }
 
-      #pragma acc update device( \
-          pyramid1_flat[0:pyramid_meta.total_size], \
-          pyramid1_gradx_flat[0:pyramid_meta.total_size], \
-          pyramid1_grady_flat[0:pyramid_meta.total_size])
         
       //verifyPyramidContents("KLTTrackFeaturesACC - pyramid1gradx", pyramid1_gradx_flat, tc->nPyramidLevels, (int)tc->subsampling, ncols, nrows);
       //verifyPyramidContents("KLTTrackFeaturesACC - pyramid1grady", pyramid1_grady_flat, tc->nPyramidLevels, (int)tc->subsampling, ncols, nrows);
@@ -691,26 +703,17 @@ void KLTTrackFeaturesACC(
       pyramid2_gradx_flat = temp_gradx;
       pyramid2_grady_flat = temp_grady;
 
-      #pragma acc update device( \
-        pyramid1_flat[0:1], \
-        pyramid1_gradx_flat[0:1], \
-        pyramid1_grady_flat[0:1])
       
-      //printf("Sequential mode: Swapped frame buffers (reusing previous frame2 as new frame1)\n");
-    
+      //printf("Sequential mode: Swapped frame buffers (reusing previous frame2 as new frame1)\n");  
 
     }
 
     _KLTToFloatImageACC(img2, ncols, nrows, img2_flat);
 
-    #pragma acc update device(img2_flat[0:ncols*nrows])
-
     // Always compute pyramid for second image using flat functions
     _KLTComputeSmoothedImageACC(img2_flat, ncols, nrows,
                                 _KLTComputeSmoothSigma(tc),
                                 smooth_img2_flat, ncols, nrows);
-
-    #pragma acc update device(smooth_img2_flat[0:ncols*nrows])
     
     computePyramidOpenACC(smooth_img2_flat, ncols, nrows,
                          tc->pyramid_sigma_fact,
@@ -723,8 +726,8 @@ void KLTTrackFeaturesACC(
       float *level_img = pyramid2_flat + pyramid_meta.offsets[i];
       float *level_gradx = pyramid2_gradx_flat + pyramid_meta.offsets[i];
       float *level_grady = pyramid2_grady_flat + pyramid_meta.offsets[i];
-      int level_ncols = getPyramidLevelCols(i);
-      int level_nrows = getPyramidLevelRows(i);
+      int level_ncols = pyramid_meta.ncols[i];
+      int level_nrows = pyramid_meta.nrows[i];
       
       _KLTComputeGradientsACC(level_img, level_ncols, level_nrows,
                               tc->grad_sigma,
@@ -732,27 +735,26 @@ void KLTTrackFeaturesACC(
                               level_grady, level_ncols, level_nrows);
     }
 
-    #pragma acc update device( \
-        pyramid2_flat[0:pyramid_meta.total_size], \
-        pyramid2_gradx_flat[0:pyramid_meta.total_size], \
-        pyramid2_grady_flat[0:pyramid_meta.total_size])
-
-
     //verifyPyramidContents("KLTTrackFeaturesACC - pyramid2gradx", pyramid2_gradx_flat, tc->nPyramidLevels, (int)tc->subsampling, ncols, nrows);
     //verifyPyramidContents("KLTTrackFeaturesACC - pyramid2grady", pyramid2_grady_flat, tc->nPyramidLevels, (int)tc->subsampling, ncols, nrows);
 
 
     // Track features using flat buffers
-    #pragma acc parallel loop present( \
+       #pragma acc kernels present( \
         pyramid1_flat, pyramid1_gradx_flat, pyramid1_grady_flat, \
-        pyramid2_flat, pyramid2_gradx_flat, pyramid2_grady_flat)
+        pyramid2_flat, pyramid2_gradx_flat, pyramid2_grady_flat, \
+        pyramid_meta, pyramid_meta.ncols, pyramid_meta.nrows, pyramid_meta.offsets)
     for (indx = 0; indx < featurelist->nFeatures; indx++) {
+
+      int val;
 
       if (featurelist->feature[indx]->val >= 0) {
 
         float xloc = featurelist->feature[indx]->x;
         float yloc = featurelist->feature[indx]->y;
         float xlocout = xloc, ylocout = yloc;
+
+        int tracking_failed = 0;  // Flag to track failure
 
 
         /* Transform location to coarsest resolution */
@@ -763,7 +765,9 @@ void KLTTrackFeaturesACC(
 
 
         // Track through pyramid levels (coarsest to finest)
-        for (int r = tc->nPyramidLevels - 1; r >= 0; r--) {
+        for (r = tc->nPyramidLevels - 1; r >= 0; r--) {
+
+          if (tracking_failed) continue;
 
           float *img1_level = pyramid1_flat + pyramid_meta.offsets[r];
           float *gradx1_level = pyramid1_gradx_flat + pyramid_meta.offsets[r];
@@ -776,8 +780,8 @@ void KLTTrackFeaturesACC(
           xloc *= subsampling;  yloc *= subsampling;
           xlocout *= subsampling;  ylocout *= subsampling;
          
-          int level_ncols = getPyramidLevelCols(r);
-          int level_nrows = getPyramidLevelRows(r);
+          int level_ncols = pyramid_meta.ncols[r];
+          int level_nrows = pyramid_meta.nrows[r];
 
           if (indx==0){
             //printf("Tracking feature %d at pyramid level %d with image size %dx%d\n", indx, r, level_ncols, level_nrows);
@@ -795,10 +799,10 @@ void KLTTrackFeaturesACC(
                                  tc->step_factor, tc->max_iterations,
                                  tc->min_determinant, tc->min_displacement,
                                  tc->max_residue, tc->lighting_insensitive
-                                 , indx);
+                                 );
 
           if (val==KLT_SMALL_DET || val==KLT_OOB)
-            break;
+            tracking_failed = 1;
 
         }
 
@@ -807,58 +811,27 @@ void KLTTrackFeaturesACC(
           featurelist->feature[indx]->x   = -1.0;
           featurelist->feature[indx]->y   = -1.0;
           featurelist->feature[indx]->val = KLT_OOB;
-          if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
-          if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
-          if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
-          featurelist->feature[indx]->aff_img = NULL;
-          featurelist->feature[indx]->aff_img_gradx = NULL;
-          featurelist->feature[indx]->aff_img_grady = NULL;
-
         } else if (_outOfBounds(xlocout, ylocout, ncols, nrows, tc->borderx, tc->bordery))  {
           featurelist->feature[indx]->x   = -1.0;
           featurelist->feature[indx]->y   = -1.0;
           featurelist->feature[indx]->val = KLT_OOB;
-          if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
-          if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
-          if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
-          featurelist->feature[indx]->aff_img = NULL;
-          featurelist->feature[indx]->aff_img_gradx = NULL;
-          featurelist->feature[indx]->aff_img_grady = NULL;
         } else if (val == KLT_SMALL_DET)  {
           featurelist->feature[indx]->x   = -1.0;
           featurelist->feature[indx]->y   = -1.0;
           featurelist->feature[indx]->val = KLT_SMALL_DET;
-          if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
-          if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
-          if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
-          featurelist->feature[indx]->aff_img = NULL;
-          featurelist->feature[indx]->aff_img_gradx = NULL;
-          featurelist->feature[indx]->aff_img_grady = NULL;
         } else if (val == KLT_LARGE_RESIDUE)  {
           featurelist->feature[indx]->x   = -1.0;
           featurelist->feature[indx]->y   = -1.0;
           featurelist->feature[indx]->val = KLT_LARGE_RESIDUE;
-          if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
-          if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
-          if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
-          featurelist->feature[indx]->aff_img = NULL;
-          featurelist->feature[indx]->aff_img_gradx = NULL;
-          featurelist->feature[indx]->aff_img_grady = NULL;
         } else if (val == KLT_MAX_ITERATIONS)  {
           featurelist->feature[indx]->x   = -1.0;
           featurelist->feature[indx]->y   = -1.0;
           featurelist->feature[indx]->val = KLT_MAX_ITERATIONS;
-          if( featurelist->feature[indx]->aff_img ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img);
-          if( featurelist->feature[indx]->aff_img_gradx ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_gradx);
-          if( featurelist->feature[indx]->aff_img_grady ) _KLTFreeFloatImage(featurelist->feature[indx]->aff_img_grady);
-          featurelist->feature[indx]->aff_img = NULL;
-          featurelist->feature[indx]->aff_img_gradx = NULL;
-          featurelist->feature[indx]->aff_img_grady = NULL;
         } else  {
           featurelist->feature[indx]->x = xlocout;
           featurelist->feature[indx]->y = ylocout;
           featurelist->feature[indx]->val = KLT_TRACKED;
-			  }
+		}
       
       }
     }
@@ -867,44 +840,35 @@ void KLTTrackFeaturesACC(
   frame_count++;
 }
 
-/*********************************************************************
- * Cleanup function
- */
-
-void cleanupOpenACCResources()
-{    
-
-    if (!device_buffs_allocated) return; 
-
-    size_t total_size = getPyramidTotalSize();
-    
-    // Delete device memory
-    #pragma acc exit data delete( \
-        img1_flat[0:1], img2_flat[0:1], \
-        smooth_img1_flat[0:1], smooth_img2_flat[0:1], \
-        pyramid1_flat[0:total_size], pyramid2_flat[0:total_size], \
-        pyramid1_gradx_flat[0:total_size], pyramid1_grady_flat[0:total_size], \
-        pyramid2_gradx_flat[0:total_size], pyramid2_grady_flat[0:total_size])
-    
-    // Free host memory
-    freePyramidMetadata();
-    free(pyramid1_flat);
-    free(pyramid1_gradx_flat);
-    free(pyramid1_grady_flat);
-    free(pyramid2_flat);
-    free(pyramid2_gradx_flat);
-    free(pyramid2_grady_flat);
-    free(img1_flat);
-    free(img2_flat);
-    free(smooth_img1_flat);
-    free(smooth_img2_flat);
-    
-    pyramid1_flat = pyramid1_gradx_flat = pyramid1_grady_flat = NULL;
-    pyramid2_flat = pyramid2_gradx_flat = pyramid2_grady_flat = NULL;
-    img1_flat = img2_flat = smooth_img1_flat = smooth_img2_flat = NULL;
-    
-    first_frame = true;
-    frame_count = 0;
-    
-    printf("Cleaned up OpenACC resources\n");
+void cleanupOpenACCResources() {
+    if (pyramid_meta_initialized) {
+        #pragma acc exit data delete( \
+            pyramid1_flat[0:pyramid_meta.total_size], \
+            pyramid1_gradx_flat[0:pyramid_meta.total_size], \
+            pyramid1_grady_flat[0:pyramid_meta.total_size], \
+            pyramid2_flat[0:pyramid_meta.total_size], \
+            pyramid2_gradx_flat[0:pyramid_meta.total_size], \
+            pyramid2_grady_flat[0:pyramid_meta.total_size], \
+            img1_flat[0:1], img2_flat[0:1], \
+            smooth_img1_flat[0:1], smooth_img2_flat[0:1], \
+            pyramid_meta.offsets[0:pyramid_meta.nLevels], \
+            pyramid_meta.nrows[0:pyramid_meta.nLevels], \
+            pyramid_meta.ncols[0:pyramid_meta.nLevels], \
+            pyramid_meta)
+        
+        
+        freePyramidMetadata();
+        if (pyramid1_flat) free(pyramid1_flat);
+        if (pyramid1_gradx_flat) free(pyramid1_gradx_flat);
+        if (pyramid1_grady_flat) free(pyramid1_grady_flat);
+        if (pyramid2_flat) free(pyramid2_flat);
+        if (pyramid2_gradx_flat) free(pyramid2_gradx_flat);
+        if (pyramid2_grady_flat) free(pyramid2_grady_flat);
+        if (img1_flat) free(img1_flat);
+        if (img2_flat) free(img2_flat);
+        if (smooth_img1_flat) free(smooth_img1_flat);
+        if (smooth_img2_flat) free(smooth_img2_flat);
+        
+        pyramid_meta_initialized = false;
+    }
 }

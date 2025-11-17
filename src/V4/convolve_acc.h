@@ -28,4 +28,3 @@ void computePyramidOpenACC(
   float *pyramid, int subsampling, int nLevels);
 
 #endif 
-

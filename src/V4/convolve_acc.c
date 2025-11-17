@@ -29,7 +29,7 @@ void _KLTToFloatImageACC(
 {
 
   #pragma acc parallel loop copyin(img[0:ncols*nrows]) \
-                           copyout(floatimg[0:ncols*nrows])
+                           present(floatimg[0:ncols*nrows])
   for (int i = 0; i < ncols * nrows; i++) {
     floatimg[i] = (float)img[i];
   }
@@ -49,15 +49,16 @@ static void _convolveImageHoriz(
   int kernel_width = kernel.width;
 
   #pragma acc parallel loop gang vector collapse(2) \
-              copyin(imgin[0:in_ncols*in_nrows], kernel) \
-              copyout(imgout[0:out_ncols*out_nrows])
+              present(imgin[0:in_ncols*in_nrows], \
+                      imgout[0:out_ncols*out_nrows]) \
+              copyin(kernel)
   for (int j = 0; j < in_nrows; j++) {
     for (int i = 0; i < in_ncols; i++) {
       if (i < radius || i >= in_ncols - radius) {
         imgout[j * out_ncols + i] = 0.0f;
       } else {
         float sum = 0.0f;
-        #pragma acc loop seq
+        #pragma acc loop vector reduction(+:sum)
         for (int k = 0; k < kernel_width; k++) {
           sum += imgin[j * in_ncols + i - radius + k] * 
                  kernel.data[kernel_width - 1 - k];
@@ -81,15 +82,16 @@ static void _convolveImageVert(
   int kernel_width = kernel.width;
 
   #pragma acc parallel loop gang vector collapse(2) \
-              copyin(imgin[0:in_ncols*in_nrows], kernel) \
-              copyout(imgout[0:out_ncols*out_nrows])
+              present(imgin[0:in_ncols*in_nrows], \
+                      imgout[0:out_ncols*out_nrows]) \
+              copyin(kernel)
   for (int i = 0; i < in_ncols; i++) {
     for (int j = 0; j < in_nrows; j++) {
       if (j < radius || j >= in_nrows - radius) {
         imgout[j * out_ncols + i] = 0.0f;
       } else {
         float sum = 0.0f;
-        #pragma acc loop seq
+        #pragma acc loop vector reduction(+:sum)
         for (int k = 0; k < kernel_width; k++) {
           sum += imgin[(j - radius + k) * in_ncols + i] * 
                  kernel.data[kernel_width - 1 - k];
@@ -125,6 +127,7 @@ static void _convolveSeparate(
 }
 
 
+
 /*********************************************************************
  * _KLTComputeGradients - Using flat buffers
  */
@@ -139,7 +142,9 @@ void _KLTComputeGradientsACC(
   if (fabs(sigma - sigma_last) > 0.05)
     _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
   
-  #pragma acc data present(img, gradx, grady)
+  #pragma acc data present(img[0:img_ncols*img_nrows], \
+                          gradx[0:gradx_ncols*gradx_nrows], \
+                          grady[0:grady_ncols*grady_nrows])
   {
     _convolveSeparate(img, img_ncols, img_nrows,
                      gaussderiv_kernel, gauss_kernel,
@@ -163,7 +168,8 @@ void _KLTComputeSmoothedImageACC(
   if (fabs(sigma - sigma_last) > 0.05)
     _computeKernels(sigma, &gauss_kernel, &gaussderiv_kernel);
 
-  #pragma acc data present(img, smooth)
+   #pragma acc data present(img[0:img_ncols*img_nrows], \
+                          smooth[0:smooth_ncols*smooth_nrows])
   {
     _convolveSeparate(img, img_ncols, img_nrows,
                      gauss_kernel, gauss_kernel,
@@ -184,7 +190,8 @@ void computePyramidOpenACC(
   float sigma = subsampling * sigma_fact;
 
   // Copy base level
-  #pragma acc parallel loop present(img, pyramid)
+  #pragma acc parallel loop present(img[0:img_ncols*img_nrows]) \
+                           present(pyramid[0:img_ncols*img_nrows])
   for (int i = 0; i < img_ncols * img_nrows; i++) {
     pyramid[i] = img[i];
   }

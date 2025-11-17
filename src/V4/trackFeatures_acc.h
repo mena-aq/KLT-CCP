@@ -10,6 +10,7 @@
 /* Forward declarations */
 #include "klt.h"
 
+
 void initializePyramidMetadata(int base_ncols, int base_nrows, int subsampling, int nLevels);
 void freePyramidMetadata();
 
@@ -31,5 +32,3 @@ int getPyramidLevelCols(int level);
 int getPyramidLevelRows(int level);
 
 #endif 
-
-

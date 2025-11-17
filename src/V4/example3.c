@@ -66,6 +66,7 @@ int main(int argc, char *argv[])
   unsigned char *img1, *img2;
   char fnamein[100], fnameout[100];
   char dataset_folder[200] = "../../data/dataset3"; // default folder
+  //char dataset_folder[200] = "/kaggle/input/cityscape/dataset2";
   char output_folder[200] = "output";
 
   KLT_TrackingContext tc;
@@ -82,6 +83,7 @@ int main(int argc, char *argv[])
   if (argc > 1) {
     sprintf(dataset_folder, "../../data/%s", argv[1]);
   }
+
 
   // count the number of image files in the dataset folder
   nFrames = count_image_files(dataset_folder);
@@ -154,4 +156,3 @@ int main(int argc, char *argv[])
 
   return 0;
 }
-
